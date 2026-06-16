@@ -1,0 +1,7 @@
+data/logs/
+data/outbox/
+data/snapshots/
+data/**/*.log
+data/**/*.json
+data/**/*.md
+*.tmp
