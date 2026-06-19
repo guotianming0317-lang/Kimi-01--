@@ -16,11 +16,26 @@ param(
 
   [Parameter(ParameterSetName = "Content")]
   [Parameter(ParameterSetName = "ContentPath")]
-  [string]$SettingsPath = ""
+  [string]$SettingsPath = "",
+
+  [Parameter(ParameterSetName = "Content")]
+  [Parameter(ParameterSetName = "ContentPath")]
+  [ValidateRange(1, 10)]
+  [int]$MaxAttempts = 3,
+
+  [Parameter(ParameterSetName = "Content")]
+  [Parameter(ParameterSetName = "ContentPath")]
+  [ValidateRange(1, 30)]
+  [int]$RetryDelaySeconds = 5,
+
+  [Parameter(ParameterSetName = "Content")]
+  [Parameter(ParameterSetName = "ContentPath")]
+  [string]$QueueRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
 $stage = "initializing"
+. (Join-Path $PSScriptRoot "FeishuCardShared.ps1")
 trap {
   Write-Error ("Feishu sender failed while {0}: {1}" -f $stage, $_.Exception.Message)
   exit 1
@@ -91,6 +106,32 @@ function New-FeishuSignature {
   return [Convert]::ToBase64String($hmac.ComputeHash([byte[]]@()))
 }
 
+function Save-QueuedPush {
+  param(
+    [string]$QueueDirectory,
+
+    [Parameter(Mandatory = $true)]
+    [string]$Reason
+  )
+
+  if (-not $QueueDirectory) {
+    return
+  }
+
+  New-Item -ItemType Directory -Force -Path $QueueDirectory | Out-Null
+  $queueFile = Join-Path $QueueDirectory ("queued_push_{0}.json" -f (Get-Date -Format "yyyyMMdd_HHmmss_fff"))
+  $queueItem = [pscustomobject]@{
+    queued_at = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    title = $Title
+    template = $Template
+    content = $Content
+    content_path = $ContentPath
+    settings_path = $SettingsPath
+    reason = $Reason
+  }
+  $queueItem | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $queueFile -Encoding UTF8
+}
+
 if ($ContentPath) {
   if (-not (Test-Path -LiteralPath $ContentPath)) {
     throw "Content file not found: $ContentPath"
@@ -106,75 +147,70 @@ $stage = "loading Feishu credentials"
 $credentials = Get-FeishuCredential
 
 $stage = "building Feishu card"
-$elements = @()
-$chunk = ""
-foreach ($line in ($Content -split "`r?`n")) {
-  $candidate = if ($chunk) { "$chunk`n$line" } else { $line }
-  if ($candidate.Length -gt 3000 -and $chunk) {
-    $elements += @{
-      tag = "div"
-      text = @{
-        tag = "lark_md"
-        content = $chunk
-      }
-    }
-    $elements += @{ tag = "hr" }
-    $chunk = $line
-  } else {
-    $chunk = $candidate
-  }
-}
-
-if ($chunk) {
-  $elements += @{
-    tag = "div"
-    text = @{
-      tag = "lark_md"
-      content = $chunk
-    }
-  }
-}
-
-$payload = @{
-  msg_type = "interactive"
-  card = @{
-    config = @{ wide_screen_mode = $true }
-    header = @{
-      template = $Template
-      title = @{
-        tag = "plain_text"
-        content = $Title
-      }
-    }
-    elements = @($elements)
-  }
+$messageSpecs = @(New-FeishuMessageSpecs -Title $Title -Content $Content)
+if (-not $messageSpecs) {
+  throw "No Feishu message content generated."
 }
 
 $stage = "signing Feishu request"
-if ($credentials.Secret) {
-  $timestamp = [string][int][double]::Parse((Get-Date -UFormat %s))
-  $payload.timestamp = $timestamp
-  $payload.sign = New-FeishuSignature -Timestamp $timestamp -Secret $credentials.Secret
-}
+foreach ($messageSpec in $messageSpecs) {
+  $payload = @{
+    msg_type = "interactive"
+    card = @{
+      config = @{ wide_screen_mode = $true }
+      header = @{
+        template = $Template
+        title = @{
+          tag = "plain_text"
+          content = [string]$messageSpec.Title
+        }
+      }
+      elements = @($messageSpec.Elements)
+    }
+  }
 
-$stage = "sending Feishu request"
-$json = $payload | ConvertTo-Json -Depth 12
-$response = Invoke-RestMethod `
-  -Method Post `
-  -Uri $credentials.Webhook `
-  -ContentType "application/json; charset=utf-8" `
-  -Body $json `
-  -TimeoutSec 20
+  if ($credentials.Secret) {
+    $timestamp = [string][int][double]::Parse((Get-Date -UFormat %s))
+    $payload.timestamp = $timestamp
+    $payload.sign = New-FeishuSignature -Timestamp $timestamp -Secret $credentials.Secret
+  }
 
-$code = 0
-if ($null -ne $response.code) {
-  $code = [int]$response.code
-} elseif ($null -ne $response.StatusCode) {
-  $code = [int]$response.StatusCode
-}
+  $stage = "sending Feishu request"
+  $json = $payload | ConvertTo-Json -Depth 12
+  $response = $null
+  $lastError = $null
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+    try {
+      $response = Invoke-RestMethod `
+        -Method Post `
+        -Uri $credentials.Webhook `
+        -ContentType "application/json; charset=utf-8" `
+        -Body $json `
+        -TimeoutSec 20
+      $lastError = $null
+      break
+    } catch {
+      $lastError = $_.Exception.Message
+      if ($attempt -ge $MaxAttempts) {
+        if ($QueueRoot) {
+          Save-QueuedPush -QueueDirectory $QueueRoot -Reason $lastError
+        }
+        throw "attempt $attempt/$MaxAttempts failed: $lastError"
+      }
+      Start-Sleep -Seconds $RetryDelaySeconds
+    }
+  }
 
-if ($code -ne 0) {
-  throw "Feishu push failed: $($response | ConvertTo-Json -Compress -Depth 5)"
+  $code = 0
+  if ($null -ne $response.code) {
+    $code = [int]$response.code
+  } elseif ($null -ne $response.StatusCode) {
+    $code = [int]$response.StatusCode
+  }
+
+  if ($code -ne 0) {
+    throw "Feishu push failed: $($response | ConvertTo-Json -Compress -Depth 5)"
+  }
 }
 
 Write-Output "Feishu push succeeded."
