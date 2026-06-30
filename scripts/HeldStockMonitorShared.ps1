@@ -40,11 +40,18 @@ function Invoke-EastmoneyJson {
           $curlArgs += @("-H", ("{0}: {1}" -f $key, $Headers[$key]))
         }
         $curlArgs += $Uri
-        $curlText = & curl.exe @curlArgs
-        if ($LASTEXITCODE -eq 0 -and $curlText) {
+        $curlResult = Invoke-HiddenConsoleCommand -FilePath "curl.exe" -Arguments $curlArgs
+        $curlText = $curlResult.StdOut
+        if ($curlResult.ExitCode -eq 0 -and $curlText) {
           return ($curlText | ConvertFrom-Json)
         }
-        $lastError = if ($curlText) { $curlText } else { "curl exit code $LASTEXITCODE" }
+        if ($curlResult.StdErr) {
+          $lastError = $curlResult.StdErr
+        } elseif ($curlText) {
+          $lastError = $curlText
+        } else {
+          $lastError = "curl exit code $($curlResult.ExitCode)"
+        }
       } catch {
         $lastError = "$irmError; curl fallback: $($_.Exception.Message)"
       }
@@ -53,6 +60,44 @@ function Invoke-EastmoneyJson {
       }
       Start-Sleep -Seconds $RetryDelaySeconds
     }
+  }
+}
+
+function Invoke-HiddenConsoleCommand {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$FilePath,
+
+    [string[]]$Arguments = @()
+  )
+
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = $FilePath
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  $psi.RedirectStandardOutput = $true
+  $psi.RedirectStandardError = $true
+  $escapedArgs = @($Arguments | ForEach-Object {
+    $value = [string]$_
+    if ($value -match '[\s"]') {
+      '"' + ($value -replace '"', '\"') + '"'
+    } else {
+      $value
+    }
+  })
+  $psi.Arguments = ($escapedArgs -join ' ')
+
+  $process = New-Object System.Diagnostics.Process
+  $process.StartInfo = $psi
+  [void]$process.Start()
+  $stdout = $process.StandardOutput.ReadToEnd()
+  $stderr = $process.StandardError.ReadToEnd()
+  $process.WaitForExit()
+
+  [pscustomobject]@{
+    ExitCode = $process.ExitCode
+    StdOut = $stdout
+    StdErr = $stderr
   }
 }
 
@@ -333,21 +378,115 @@ function Test-MissingValue($value) {
   return $false
 }
 
+function Get-SafeDoubleOrNull {
+  param($Value)
+
+  if (Test-MissingValue $Value) {
+    return $null
+  }
+
+  if ($Value -is [double] -or $Value -is [float] -or $Value -is [decimal] -or $Value -is [int] -or $Value -is [long]) {
+    return [double]$Value
+  }
+
+  $text = [string]$Value
+  $styles = [Globalization.NumberStyles]::Float -bor [Globalization.NumberStyles]::AllowThousands
+  $parsed = 0.0
+  if ([double]::TryParse($text, $styles, [Globalization.CultureInfo]::InvariantCulture, [ref]$parsed)) {
+    return $parsed
+  }
+  if ([double]::TryParse($text, $styles, [Globalization.CultureInfo]::CurrentCulture, [ref]$parsed)) {
+    return $parsed
+  }
+
+  return $null
+}
+
+function Get-SafeDouble {
+  param(
+    $Value,
+    [double]$Default = 0
+  )
+
+  $parsed = Get-SafeDoubleOrNull $Value
+  if ($null -eq $parsed) {
+    return $Default
+  }
+  return [double]$parsed
+}
+
+function Get-SafeSum {
+  param(
+    [object[]]$Items,
+
+    [Parameter(Mandatory = $true)]
+    [string]$PropertyName
+  )
+
+  $sum = 0.0
+  if ($null -eq $Items) {
+    return $sum
+  }
+  foreach ($item in $Items) {
+    $sum += Get-SafeDouble (Select-Object -InputObject $item -ExpandProperty $PropertyName -ErrorAction SilentlyContinue)
+  }
+  return $sum
+}
+
+function Get-UserFriendlyReportError {
+  param(
+    [string]$Message
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Message)) {
+    return "未知原因"
+  }
+
+  $clean = $Message.Trim()
+  $jsonStart = $clean.IndexOf('{"')
+  if ($jsonStart -lt 0) {
+    $jsonStart = $clean.IndexOf('{')
+  }
+  if ($jsonStart -gt 0) {
+    $clean = $clean.Substring(0, $jsonStart).TrimEnd()
+  }
+
+  if ($clean -match "Eastmoney request failed after \d+ attempts:\s*(.+)$") {
+    $clean = $Matches[1].Trim()
+  }
+
+  $clean = $clean -replace "\s*;\s*curl fallback:\s*", "；curl 兜底失败："
+  $clean = $clean -replace "基础连接已经关闭: 连接被意外关闭。", "连接被远端中断。"
+  $clean = $clean -replace "无法连接到远程服务器", "无法连接到远程服务器。"
+  $clean = $clean -replace '传入的对象无效，应为“:”或“}”。\s*(\(\d+\):)?', "返回内容解析失败。"
+  $clean = $clean -replace "\s+", " "
+  $clean = $clean.Trim(" ", ";", "；")
+
+  if ([string]::IsNullOrWhiteSpace($clean)) {
+    return "接口返回异常"
+  }
+
+  return $clean
+}
+
 function Format-CnyWan($value) {
-  if (Test-MissingValue $value) { return "--" }
-  $num = [double]$value
+  $parsed = Get-SafeDoubleOrNull $value
+  if ($null -eq $parsed) { return "--" }
+  $num = [double]$parsed
   if ([Math]::Abs($num) -ge 100000000) { return ("{0:N2}亿元" -f ($num / 100000000)) }
   return ("{0:N2}万元" -f ($num / 10000))
 }
 
 function Format-Pct($value) {
-  if (Test-MissingValue $value) { return "--" }
-  return ("{0:N2}%" -f ([double]$value))
+  $parsed = Get-SafeDoubleOrNull $value
+  if ($null -eq $parsed) { return "--" }
+  return ("{0:N2}%" -f ([double]$parsed))
 }
 
 function Format-ColoredPct($value) {
-  if (Test-MissingValue $value) { return "--" }
-  $num = [double]$value
+  $parsed = Get-SafeDoubleOrNull $value
+  if ($null -eq $parsed) { return "--" }
+  $num = [double]$parsed
   $text = "{0:N2}%" -f $num
   if ($num -gt 0) {
     return "<font color=`"red`">$text</font>"
@@ -359,16 +498,18 @@ function Format-ColoredPct($value) {
 }
 
 function Format-SignedCny($value) {
-  if (Test-MissingValue $value) { return "--" }
-  $num = [double]$value
+  $parsed = Get-SafeDoubleOrNull $value
+  if ($null -eq $parsed) { return "--" }
+  $num = [double]$parsed
   $prefix = if ($num -gt 0) { "+" } else { "" }
   if ([Math]::Abs($num) -ge 100000000) { return ("{0}{1:N2}亿元" -f $prefix, ($num / 100000000)) }
   return ("{0}{1:N2}万元" -f $prefix, ($num / 10000))
 }
 
 function Format-ColoredSignedCny($value) {
-  if (Test-MissingValue $value) { return "--" }
-  $num = [double]$value
+  $parsed = Get-SafeDoubleOrNull $value
+  if ($null -eq $parsed) { return "--" }
+  $num = [double]$parsed
   $text = Format-SignedCny $value
   if ($num -gt 0) {
     return "<font color=`"red`">$text</font>"
@@ -380,8 +521,9 @@ function Format-ColoredSignedCny($value) {
 }
 
 function Format-AbsoluteCny($value) {
-  if (Test-MissingValue $value) { return "--" }
-  $num = [Math]::Abs([double]$value)
+  $parsed = Get-SafeDoubleOrNull $value
+  if ($null -eq $parsed) { return "--" }
+  $num = [Math]::Abs([double]$parsed)
   if ($num -ge 100000000) { return ("{0:N2}亿元" -f ($num / 100000000)) }
   return ("{0:N2}万元" -f ($num / 10000))
 }
@@ -401,7 +543,7 @@ function Format-ColoredAbsoluteCny {
 }
 
 function Format-DeltaText($delta) {
-  $num = [double]$delta
+  $num = Get-SafeDouble $delta
   if ([Math]::Abs($num) -lt 1000000) { return "基本持平" }
   if ($num -gt 0) { return "改善 $(Format-SignedCny $num)" }
   return "恶化 $(Format-SignedCny $num)"
@@ -428,27 +570,84 @@ function Format-MidSmallFlowSegment {
     $SmallRatio
   )
 
-  $midSmallFlow = [double]$MediumFlow + [double]$SmallFlow
-  $midSmallRatio = [double]$MediumRatio + [double]$SmallRatio
+  $midSmallFlow = (Get-SafeDouble $MediumFlow) + (Get-SafeDouble $SmallFlow)
+  $midSmallRatio = (Get-SafeDouble $MediumRatio) + (Get-SafeDouble $SmallRatio)
   Format-OrderFlowSegment -Label "中小单" -Flow $midSmallFlow -Ratio $midSmallRatio
+}
+
+function Resolve-OrderInOut {
+  param(
+    $Flow,
+    $In,
+    $Out
+  )
+
+  $flowValue = Get-SafeDoubleOrNull $Flow
+  $inValue = Get-SafeDoubleOrNull $In
+  $outValue = Get-SafeDoubleOrNull $Out
+
+  if (($null -ne $inValue) -and ($null -ne $outValue)) {
+    return [pscustomobject]@{
+      IsResolved = $true
+      In = [double]$inValue
+      Out = [double]$outValue
+    }
+  }
+
+  if ($null -eq $flowValue) {
+    return [pscustomobject]@{
+      IsResolved = $false
+      In = $null
+      Out = $null
+    }
+  }
+
+  if (($null -eq $inValue) -and ($null -ne $outValue)) {
+    $inValue = $flowValue + $outValue
+  } elseif (($null -ne $inValue) -and ($null -eq $outValue)) {
+    $outValue = $inValue - $flowValue
+  } elseif (($null -eq $inValue) -and ($null -eq $outValue) -and ([Math]::Abs($flowValue) -lt 0.0001)) {
+    $inValue = 0.0
+    $outValue = 0.0
+  }
+
+  if (($null -eq $inValue) -or ($null -eq $outValue) -or ($inValue -lt 0) -or ($outValue -lt 0)) {
+    return [pscustomobject]@{
+      IsResolved = $false
+      In = $null
+      Out = $null
+    }
+  }
+
+  [pscustomobject]@{
+    IsResolved = $true
+    In = [double]$inValue
+    Out = [double]$outValue
+  }
 }
 
 function Get-MainFlowSummary {
   param(
     $MainFlow,
+    $SuperFlow,
     $SuperIn,
     $SuperOut,
+    $LargeFlow,
     $LargeIn,
     $LargeOut
   )
 
-  if ((Test-MissingValue $SuperIn) -or (Test-MissingValue $SuperOut) -or (Test-MissingValue $LargeIn) -or (Test-MissingValue $LargeOut)) {
+  $superResolved = Resolve-OrderInOut -Flow $SuperFlow -In $SuperIn -Out $SuperOut
+  $largeResolved = Resolve-OrderInOut -Flow $LargeFlow -In $LargeIn -Out $LargeOut
+
+  if ((-not $superResolved.IsResolved) -or (-not $largeResolved.IsResolved)) {
     return "主力总流入：**--** ｜ 主力总流出：**--**"
   }
 
-  $inflow = [double]$SuperIn + [double]$LargeIn
-  $outflow = [double]$SuperOut + [double]$LargeOut
-  $net = if (Test-MissingValue $MainFlow) { $null } else { [Math]::Abs([double]$MainFlow) }
+  $inflow = [double]$superResolved.In + [double]$largeResolved.In
+  $outflow = [double]$superResolved.Out + [double]$largeResolved.Out
+  $mainParsed = Get-SafeDoubleOrNull $MainFlow
+  $net = if ($null -eq $mainParsed) { $null } else { [Math]::Abs([double]$mainParsed) }
 
   if (($inflow -lt 0) -or ($outflow -lt 0)) {
     return "主力总流入：**--** ｜ 主力总流出：**--**"

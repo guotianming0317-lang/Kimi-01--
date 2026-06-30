@@ -54,6 +54,13 @@ Code,Name
   . (Join-Path $scriptsRoot "HeldStockMonitorShared.ps1")
   $context = New-MonitorContext -DataRoot (Join-Path $testDir "monitor_context")
   Assert-True (Test-Path -LiteralPath $context.PendingPushRoot) "监控上下文应创建待补发队列目录。"
+  $hiddenCommandResult = Invoke-HiddenConsoleCommand -FilePath "powershell.exe" -Arguments @("-NoProfile", "-Command", "Write-Output 'stdout-ok'; [Console]::Error.WriteLine('stderr-ok')")
+  Assert-True ($hiddenCommandResult.ExitCode -eq 0) "隐藏子进程执行应成功。"
+  Assert-True ($hiddenCommandResult.StdOut -match "stdout-ok") "隐藏子进程应能捕获标准输出。"
+  Assert-True ($hiddenCommandResult.StdErr -match "stderr-ok") "隐藏子进程应能捕获标准错误。"
+  Assert-True ($null -eq (Get-SafeDoubleOrNull "-")) "短横线应被视为缺失值，而不是数字。"
+  Assert-True ((Get-SafeDouble "-" 99) -eq 99) "缺失值在需要时应回退到默认数值。"
+  Assert-True ((Format-MidSmallFlowSegment -MediumFlow "-" -MediumRatio "-" -SmallFlow 1200000 -SmallRatio 0.35) -match "\+120.00万元</font> / 0.35%") "中小单聚合时遇到短横线不应抛错。"
 
   $quotePath = Join-Path $testDir "quotes.json"
   @"
@@ -117,7 +124,9 @@ Code,Name
   Assert-True ($report -match "<font color=""red"">0.54%</font>") "固定监控报告应将上涨涨跌幅标为红色。"
   Assert-True ($report -match "资金动向：特大单 \*\*<font color=""red"">\+2.00亿元</font> / 3.10%\*\*，大单 \*\*<font color=""red"">\+1.23亿元</font> / 1.94%\*\*，中小单 \*\*<font color=""green"">-5,500.00万元</font> / -0.85%\*\*") "固定监控报告应正确展示各档资金动向。"
   Assert-True ($report -match "主力总流入：\*\*<font color=""red"">5.73亿元</font>\*\*.*主力总流出：\*\*<font color=""green"">2.50亿元</font>\*\*") "固定监控报告应展示真实主力总流入和主力总流出。"
-  Assert-True ((Get-MainFlowSummary -MainFlow 83252700 -SuperIn 0 -SuperOut 2 -LargeIn $null -LargeOut 88.12) -eq "主力总流入：**--** ｜ 主力总流出：**--**") "不满足资金守恒关系的总流入/总流出应视为无效数据。"
+  Assert-True ((Get-MainFlowSummary -MainFlow 83252700 -SuperFlow 0 -SuperIn 0 -SuperOut 2 -LargeFlow $null -LargeIn $null -LargeOut 88.12) -eq "主力总流入：**--** ｜ 主力总流出：**--**") "不满足基础反推条件的总流入/总流出应视为无效数据。"
+  Assert-True ((Get-MainFlowSummary -MainFlow 1991437 -SuperFlow 0 -SuperIn "-" -SuperOut "-" -LargeFlow 1991437 -LargeIn 13883780 -LargeOut 11892343) -match "1,388.38万元.*1,189.23万元") "特大单双缺失且净额为零时，应能回推出 0/0 并保留总流入总流出。"
+  Assert-True ((Get-MainFlowSummary -MainFlow -1864014 -SuperFlow -1033045 -SuperIn "-" -SuperOut 1033045 -LargeFlow -830969 -LargeIn 3588341 -LargeOut 4419310) -match "358.83万元.*545.24万元") "单侧缺失时应可结合净额反推主力总流入总流出。"
   Assert-True ($report -match "上海电力（600021）") "固定监控报告应包含上海电力。"
   Assert-True ($report -match "<font color=""green"">-1.38亿元</font>") "固定监控报告应将净流出标为绿色。"
   Assert-True ($report.IndexOf("沪硅产业") -lt $report.IndexOf("上海电力")) "完整持有列表应按主力净额从流入到流出排序。"
@@ -186,6 +195,54 @@ Code,Name
   $fallbackReport = Get-Content -LiteralPath $fallbackReportFile.FullName -Raw -Encoding UTF8
   Assert-True ($fallbackReport -match "【降级】") "降级报告应明确标注已回退到最近快照。"
   Assert-True ($fallbackReport -match "比亚迪") "降级报告应仍然包含快照中的持仓数据。"
+
+  $sanitizedError = Get-UserFriendlyReportError 'Eastmoney request failed after 3 attempts: 基础连接已经关闭: 连接被意外关闭。; curl fallback: 传入的对象无效，应为“:”或“}”。 (190): {"rc":0,"data":{"diff":[{"f14":"姣斾簹杩?"}]}}'
+  Assert-True ($sanitizedError -eq "连接被远端中断。；curl 兜底失败：返回内容解析失败。") "用户可见错误信息应去掉原始乱码载荷。"
+
+  $dashQuotePath = Join-Path $testDir "dash_quotes.json"
+  @"
+{
+  "data": {
+    "diff": [
+      { "f12": "002594", "f14": "比亚迪", "f2": 89.64, "f3": -1.30, "f62": "-", "f184": "-", "f66": "-", "f69": "-", "f72": "-", "f75": "-", "f78": "-", "f81": "-", "f84": "-", "f87": "-" },
+      { "f12": "600021", "f14": "上海电力", "f2": 17.46, "f3": -0.46, "f62": -137829782, "f184": -11.43, "f66": -80000000, "f69": -6.50, "f72": -57829782, "f75": -4.93, "f78": 5000000, "f81": 0.40, "f84": "-", "f87": "-" },
+      { "f12": "688126", "f14": "沪硅产业", "f2": 31.05, "f3": 0.54, "f62": 322785232, "f184": 5.04, "f66": 200000000, "f69": 3.10, "f72": 122785232, "f75": 1.94, "f78": "-", "f81": "-", "f84": -15000000, "f87": -0.23 }
+    ]
+  }
+}
+"@ | Set-Content -LiteralPath $dashQuotePath -Encoding UTF8
+  $dashRoot = Join-Path $testDir "dash_data"
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner `
+    -HoldingsPath $holdingsPath `
+    -DataRoot $dashRoot `
+    -QuoteDataPath $dashQuotePath `
+    -NoPush | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "短横线行情数据不应导致固定报告脚本失败，退出码 $LASTEXITCODE"
+  }
+  $dashReportFile = Get-ChildItem -LiteralPath (Join-Path $dashRoot "outbox") -Filter "*.md" |
+    Where-Object { $_.Name -notlike "anomaly_alert_*" } |
+    Select-Object -First 1
+  Assert-True ($null -ne $dashReportFile) "短横线行情数据场景仍应生成报告。"
+  $dashReport = Get-Content -LiteralPath $dashReportFile.FullName -Raw -Encoding UTF8
+  Assert-True ($dashReport -match "比亚迪") "短横线行情数据场景仍应保留对应股票。"
+
+  $noSnapshotRoot = Join-Path $testDir "no_snapshot_data"
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner `
+    -HoldingsPath $holdingsPath `
+    -DataRoot $noSnapshotRoot `
+    -QuoteDataPath (Join-Path $testDir "missing_quotes_again.json") `
+    -NoPush | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "无快照且主行情失败时，脚本也应生成接口异常说明，退出码 $LASTEXITCODE"
+  }
+  $noSnapshotReportFile = Get-ChildItem -LiteralPath (Join-Path $noSnapshotRoot "outbox") -Filter "*.md" |
+    Where-Object { $_.Name -notlike "anomaly_alert_*" } |
+    Select-Object -First 1
+  Assert-True ($null -ne $noSnapshotReportFile) "无快照且主行情失败时应生成接口异常说明。"
+  $noSnapshotReport = Get-Content -LiteralPath $noSnapshotReportFile.FullName -Raw -Encoding UTF8
+  Assert-True ($noSnapshotReport -match "【异常】本次未获取到有效行情，且没有可用快照回退") "无快照场景应明确说明本次是接口异常说明。"
+  Assert-True ($noSnapshotReport -match "持仓范围合计主力净额：\*\*--\*\*") "无快照场景不应伪造主力净额。"
 
   $simulatedRoot = Join-Path $testDir "simulated_data"
   $simulatedSnapshotDir = Join-Path $simulatedRoot "snapshots\$tradeDate"

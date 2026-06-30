@@ -155,3 +155,17 @@
 3. `data/holdings.csv`
 4. `scripts/HeldStockMonitorShared.ps1`
 5. 最近一次需要处理的问题相关脚本
+
+## 8. 最新补充风险（2026-06-24）
+
+- 2026-06-24 上午固定报告任务并未停摆，`09:30` 与 `10:00` 的 Windows 计划任务都实际触发了。
+- `09:30` 失败原因仍是东财返回个别字段为 `"-"` 时，被脚本当作数字解析，日志关键词：
+  - `quote failed without snapshot fallback :: 输入对象“-”不是数字。`
+- `10:00` 已成功生成报告文件 `formal_replay_20260624_100007.md`，但飞书自动发送失败，日志关键词：
+  - `push failed ... :: Feishu sender exited with code 1`
+- 随后手动补发同一份报告成功，说明当时故障更像“瞬时发送链路异常”，而不是任务未运行或报告未生成。
+- 后续如果再出现“今天没主动发推送”，优先排查顺序应是：
+  1. 查看 `data/logs/fund_push.log`
+  2. 查看 `data/outbox/` 是否已经生成对应时段报告
+  3. 查看 `data/pending_pushes/` 是否有积压
+  4. 查询两个固定报告计划任务的 `Last Run Time / Last Result / Next Run Time`

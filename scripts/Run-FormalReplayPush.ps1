@@ -38,6 +38,7 @@ $valid = @()
 $snapshotRows = @()
 $snapshotResult = $null
 $snapshot = $null
+$reportFallbackReason = ""
 
 try {
   $valid = @(Get-HeldQuoteRows -Holdings $holdings -QuoteDataPath $QuoteDataPath)
@@ -63,8 +64,9 @@ try {
   }
 }
 
-$sumFlow = ($valid | Measure-Object -Property f62 -Sum).Sum
-$heldList = @($valid | Sort-Object {[double]$_.f62} -Descending)
+$sumFlow = Get-SafeSum -Items $valid -PropertyName "f62"
+$heldList = @($valid | Sort-Object { Get-SafeDouble $_.f62 } -Descending)
+$sumFlowDisplay = if ($valid.Count -gt 0) { Format-CnyWan $sumFlow } else { "--" }
 $time = if ($snapshot) { [string]$snapshot.time } else { (Get-Date -Format "yyyy-MM-dd HH:mm:ss") }
 $isCloseReport = ((Get-Date).Hour -ge 15)
 $lines = New-Object System.Collections.Generic.List[string]
@@ -72,10 +74,12 @@ $lines.Add("**核心结论**")
 $lines.Add("ℹ️【数据】本次仅监控已持有股票 **$($holdings.Count)** 只，行情返回 **$($valid.Count)** 只，数据时间 **$time**。")
 $lines.Add("ℹ️【来源】股票账户不依赖同花顺登录；持仓名单来自本项目 `data/holdings.csv`，行情数据按原自动化链路拉取。")
 if ($usedFallbackSnapshot) {
-  $lines.Add("ℹ️【降级】实时行情接口暂时不可用，以下内容回退到最近一次成功快照 **$time**。原因：$fallbackReason")
+  $reportFallbackReason = Get-UserFriendlyReportError -Message $fallbackReason
+  $lines.Add("ℹ️【降级】实时行情接口暂时不可用，以下内容回退到最近一次成功快照 **$time**。原因：$reportFallbackReason")
 }
 if ((-not $usedFallbackSnapshot) -and (-not $valid)) {
-  $lines.Add("⚠️【异常】本次未获取到有效行情，且没有可用快照回退。原因：$fallbackReason")
+  $reportFallbackReason = Get-UserFriendlyReportError -Message $fallbackReason
+  $lines.Add("⚠️【异常】本次未获取到有效行情，且没有可用快照回退。原因：$reportFallbackReason")
 }
 if ($valid.Count -lt $holdings.Count) {
   $heldCodes = @($holdings | Select-Object -ExpandProperty Code)
@@ -83,13 +87,13 @@ if ($valid.Count -lt $holdings.Count) {
   $lines.Add("ℹ️【说明】未返回行情的持仓：**$($missing -join '、')**，可能因停牌、接口暂未返回或字段缺失。")
 }
 $lines.Add("**触发原因：** 定时资金监控运行。")
-$lines.Add("ℹ️【数据】持仓范围合计主力净额：**$(Format-CnyWan $sumFlow)**。")
+$lines.Add("ℹ️【数据】持仓范围合计主力净额：**$sumFlowDisplay**。")
 $lines.Add("")
 if ($valid.Count -gt 0) {
   $lines.Add("---")
   $lines.Add("**完整持有列表（按主力净额从流入到流出排序）**")
   foreach ($r in $heldList) {
-    $dir = if ([double]$r.f62 -ge 0) { "🔴净流入" } else { "🟢净流出" }
+    $dir = if ((Get-SafeDouble $r.f62) -ge 0) { "🔴净流入" } else { "🟢净流出" }
     $flowSegments = @(
       (Format-OrderFlowSegment -Label "特大单" -Flow $r.f66 -Ratio $r.f69),
       (Format-OrderFlowSegment -Label "大单" -Flow $r.f72 -Ratio $r.f75),
@@ -97,7 +101,7 @@ if ($valid.Count -gt 0) {
     ) -join "，"
     $lines.Add("- $dir **$($r.f14)（$($r.f12)）**")
     $lines.Add("  ├ 主力净额：**$(Format-ColoredSignedCny $r.f62)**    涨跌幅：**$(Format-ColoredPct $r.f3)**")
-    $mainFlowSummary = Get-MainFlowSummary -MainFlow $r.f62 -SuperIn $r.f138 -SuperOut $r.f139 -LargeIn $r.f141 -LargeOut $r.f142
+    $mainFlowSummary = Get-MainFlowSummary -MainFlow $r.f62 -SuperFlow $r.f66 -SuperIn $r.f138 -SuperOut $r.f139 -LargeFlow $r.f72 -LargeIn $r.f141 -LargeOut $r.f142
     $lines.Add("  ├ 资金动向：$flowSegments")
     $lines.Add("  └ $mainFlowSummary")
   }
@@ -111,8 +115,8 @@ if ($isCloseReport -and $snapshotResult) {
   if ($snapshots.Count -gt 0) {
     $firstSnapshot = $snapshots | Select-Object -First 1
     $lastSnapshot = $snapshots | Select-Object -Last 1
-    $firstFlow = [double]$firstSnapshot.total_main_flow
-    $lastFlow = [double]$lastSnapshot.total_main_flow
+    $firstFlow = Get-SafeDouble $firstSnapshot.total_main_flow
+    $lastFlow = Get-SafeDouble $lastSnapshot.total_main_flow
     $flowChange = $lastFlow - $firstFlow
 
     $lines.Add("")
@@ -125,10 +129,10 @@ if ($isCloseReport -and $snapshotResult) {
     $lines.Add("**合计净额路径**")
     $previousFlow = $null
     foreach ($s in $snapshots) {
-      $flow = [double]$s.total_main_flow
+      $flow = Get-SafeDouble $s.total_main_flow
       $tag = if ($flow -ge 0) { "🔴" } else { "🟢" }
       $label = ([datetime]$s.time).ToString("HH:mm")
-      $deltaText = if ($null -eq $previousFlow) { "起点" } else { Format-DeltaText ($flow - [double]$previousFlow) }
+      $deltaText = if ($null -eq $previousFlow) { "起点" } else { Format-DeltaText ($flow - (Get-SafeDouble $previousFlow)) }
       $lines.Add("- **$label**：$tag **$(Format-SignedCny $flow)**，$deltaText")
       $previousFlow = $flow
     }
@@ -141,18 +145,18 @@ if ($isCloseReport -and $snapshotResult) {
     foreach ($r in @($lastSnapshot.rows)) {
       $code = [string]$r.code
       if (-not $firstByCode.ContainsKey($code)) { continue }
-      $delta = [double]$r.main_flow - [double]$firstByCode[$code].main_flow
+      $delta = (Get-SafeDouble $r.main_flow) - (Get-SafeDouble $firstByCode[$code].main_flow)
       $changes += [pscustomobject]@{
         code = $code
         name = [string]$r.name
         delta = $delta
-        flow = [double]$r.main_flow
+        flow = Get-SafeDouble $r.main_flow
       }
     }
     $lines.Add("")
     $lines.Add("**日内持仓变化（从改善到恶化）**")
     foreach ($r in ($changes | Sort-Object delta -Descending)) {
-      $tag = if ([double]$r.delta -ge 0) { "🔴" } else { "🟢" }
+      $tag = if ((Get-SafeDouble $r.delta) -ge 0) { "🔴" } else { "🟢" }
       $lines.Add("- $tag **$($r.name)（$($r.code)）**：日内变化 **$(Format-SignedCny $r.delta)**，最新净额 **$(Format-SignedCny $r.flow)**")
     }
   }
@@ -170,6 +174,11 @@ $encoding = New-Object System.Text.UTF8Encoding($true)
 [System.IO.File]::WriteAllText($file, $report, $encoding)
 
 $title = if ($isCloseReport) { "A股已持股份资金动向监控｜收盘资金分析" } else { "A股已持股份资金动向监控｜资金报告" }
+$template = "blue"
+if ((-not $usedFallbackSnapshot) -and (-not $valid)) {
+  $title = "A股已持股份资金动向监控｜接口异常说明"
+  $template = "orange"
+}
 if ($NoPush) {
   Write-MonitorLog -LogFile $context.LogFile -Message "dry-run generated $file"
 } else {
@@ -178,7 +187,7 @@ if ($NoPush) {
     $powershell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
     & $powershell -NoProfile -ExecutionPolicy Bypass -File $sendScript `
       -Title ([string]$title) `
-      -Template "blue" `
+      -Template ([string]$template) `
       -ContentPath ([string]$file) `
       -QueueRoot ([string]$sharedPendingPushRoot)
     if ($LASTEXITCODE -ne 0) {

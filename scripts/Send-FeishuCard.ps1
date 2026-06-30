@@ -209,6 +209,9 @@ foreach ($messageSpec in $messageSpecs) {
   }
 
   if ($code -ne 0) {
+    if ($QueueRoot) {
+      Save-QueuedPush -QueueDirectory $QueueRoot -Reason ("Feishu push failed: {0}" -f ($response | ConvertTo-Json -Compress -Depth 5))
+    }
     throw "Feishu push failed: $($response | ConvertTo-Json -Compress -Depth 5)"
   }
 }

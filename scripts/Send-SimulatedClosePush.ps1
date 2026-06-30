@@ -64,7 +64,7 @@ $heldCodes = @($holdings | Select-Object -ExpandProperty Code)
 $valid = @(
   Convert-SnapshotRowsToQuoteRows -SnapshotRows @($snapshot.rows) |
     Where-Object { $heldCodes -contains ([string]$_.f12) } |
-    Sort-Object {[double]$_.f62} -Descending
+    Sort-Object { Get-SafeDouble $_.f62 } -Descending
 )
 
 $detailMap = @{}
@@ -86,7 +86,7 @@ if ($detailMap.Count -gt 0) {
   Merge-HeldQuoteDetailFields -Rows $valid -DetailMap $detailMap
 }
 
-$sumFlow = ($valid | Measure-Object -Property f62 -Sum).Sum
+$sumFlow = Get-SafeSum -Items $valid -PropertyName "f62"
 $lines = New-Object System.Collections.Generic.List[string]
 $lines.Add((U '**\u6a21\u62df\u6536\u76d8\u8865\u53d1**'))
 $lines.Add(((U '\u2139\ufe0f\u3010\u6a21\u62df\u3011\u672c\u6761\u6d88\u606f\u4f7f\u7528 **{0}** \u6536\u76d8\u5feb\u7167\u751f\u6210\u3002') -f $snapshot.time))
@@ -99,13 +99,13 @@ $lines.Add("---")
 $lines.Add((U '**\u5b8c\u6574\u6301\u6709\u5217\u8868\uff08\u6309\u4e3b\u529b\u51c0\u989d\u4ece\u6d41\u5165\u5230\u6d41\u51fa\u6392\u5e8f\uff09**'))
 
 foreach ($r in $valid) {
-  $dir = if ([double]$r.f62 -ge 0) { U '\u51c0\u6d41\u5165' } else { U '\u51c0\u6d41\u51fa' }
+  $dir = if ((Get-SafeDouble $r.f62) -ge 0) { U '\u51c0\u6d41\u5165' } else { U '\u51c0\u6d41\u51fa' }
   $flowSegments = @(
     (Format-OrderFlowSegment -Label (U '\u7279\u5927\u5355') -Flow $r.f66 -Ratio $r.f69),
     (Format-OrderFlowSegment -Label (U '\u5927\u5355') -Flow $r.f72 -Ratio $r.f75),
     (Format-MidSmallFlowSegment -MediumFlow $r.f78 -MediumRatio $r.f81 -SmallFlow $r.f84 -SmallRatio $r.f87)
   ) -join (U '\uff0c')
-  $mainFlowSummary = Get-MainFlowSummary -MainFlow $r.f62 -SuperIn $r.f138 -SuperOut $r.f139 -LargeIn $r.f141 -LargeOut $r.f142
+  $mainFlowSummary = Get-MainFlowSummary -MainFlow $r.f62 -SuperFlow $r.f66 -SuperIn $r.f138 -SuperOut $r.f139 -LargeFlow $r.f72 -LargeIn $r.f141 -LargeOut $r.f142
   $lines.Add(((U '- {0} **{1}\uff08{2}\uff09**') -f $dir, $r.f14, $r.f12))
   $lines.Add(((U '  \u251c \u4e3b\u529b\u51c0\u989d\uff1a**{0}**    \u6da8\u8dcc\u5e45\uff1a**{1}**') -f (Format-ColoredSignedCny $r.f62), (Format-ColoredPct $r.f3)))
   $lines.Add(((U '  \u251c \u8d44\u91d1\u52a8\u5411\uff1a{0}') -f $flowSegments))

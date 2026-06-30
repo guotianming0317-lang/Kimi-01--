@@ -2,7 +2,7 @@
   [string]$HoldingsPath = (Join-Path (Split-Path -Parent $PSScriptRoot) "data\holdings.csv"),
   [string]$DataRoot = (Join-Path (Split-Path -Parent $PSScriptRoot) "data\anomaly_monitor"),
   [string]$QuoteDataPath = "",
-  [double]$AnomalyThreshold = 50000000,
+  [double]$AnomalyThreshold = 30000000,
   [switch]$NoPush
 )
 
@@ -54,13 +54,13 @@ $anomalies = @()
 foreach ($r in $snapshotRows) {
   $code = [string]$r.code
   if (-not $previousByCode.ContainsKey($code)) { continue }
-  $delta = [double]$r.main_flow - [double]$previousByCode[$code].main_flow
+  $delta = (Get-SafeDouble $r.main_flow) - (Get-SafeDouble $previousByCode[$code].main_flow)
   if ([Math]::Abs($delta) -ge $AnomalyThreshold) {
     $anomalies += [pscustomobject]@{
       code = $code
       name = [string]$r.name
       delta = $delta
-      flow = [double]$r.main_flow
+      flow = Get-SafeDouble $r.main_flow
       pct = $r.pct
       ratio = $r.main_ratio
       super_flow = $r.super_flow
@@ -96,15 +96,15 @@ $alertLines.Add("**触发阈值：** 单只股票较上次快照主力净额变�
 $alertLines.Add("**预警类型：** 瞬时主力资金大额流动。")
 $alertLines.Add("**触发数量：** $($anomalies.Count) 只")
 $alertLines.Add("")
-foreach ($a in ($anomalies | Sort-Object {[Math]::Abs([double]$_.delta)} -Descending)) {
-  $direction = if ([double]$a.delta -gt 0) { "瞬时净流入" } else { "瞬时净流出" }
+foreach ($a in ($anomalies | Sort-Object {[Math]::Abs((Get-SafeDouble $_.delta))} -Descending)) {
+  $direction = if ((Get-SafeDouble $a.delta) -gt 0) { "瞬时净流入" } else { "瞬时净流出" }
   $flowSegments = @(
     (Format-OrderFlowSegment -Label "特大单" -Flow $a.super_flow -Ratio $a.super_ratio),
     (Format-OrderFlowSegment -Label "大单" -Flow $a.large_flow -Ratio $a.large_ratio),
     (Format-MidSmallFlowSegment -MediumFlow $a.medium_flow -MediumRatio $a.medium_ratio -SmallFlow $a.small_flow -SmallRatio $a.small_ratio)
   ) -join "，"
   $alertLines.Add("- ⚠️ **$($a.name)（$($a.code)）**：$direction **$(Format-ColoredSignedCny $a.delta)**")
-  $mainFlowSummary = Get-MainFlowSummary -MainFlow $a.flow -SuperIn $a.super_in -SuperOut $a.super_out -LargeIn $a.large_in -LargeOut $a.large_out
+  $mainFlowSummary = Get-MainFlowSummary -MainFlow $a.flow -SuperFlow $a.super_flow -SuperIn $a.super_in -SuperOut $a.super_out -LargeFlow $a.large_flow -LargeIn $a.large_in -LargeOut $a.large_out
   $alertLines.Add("  ├ 当前主力净额：**$(Format-ColoredSignedCny $a.flow)**    涨跌幅：**$(Format-ColoredPct $a.pct)**    主力净占比：**$(Format-Pct $a.ratio)**")
   $alertLines.Add("  ├ 资金动向：$flowSegments")
   $alertLines.Add("  └ $mainFlowSummary")
