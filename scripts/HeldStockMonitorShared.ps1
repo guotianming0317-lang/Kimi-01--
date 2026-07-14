@@ -13,6 +13,37 @@ function Enable-PreferredTls {
   }
 }
 
+function Invoke-JsonHttpFallback {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Uri,
+
+    [hashtable]$Headers = @{},
+
+    [int]$TimeoutSec = 20
+  )
+
+  $handler = New-Object System.Net.Http.HttpClientHandler
+  $client = New-Object System.Net.Http.HttpClient($handler)
+  try {
+    $client.Timeout = [TimeSpan]::FromSeconds($TimeoutSec)
+    foreach ($key in $Headers.Keys) {
+      [void]$client.DefaultRequestHeaders.TryAddWithoutValidation([string]$key, [string]$Headers[$key])
+    }
+
+    $response = $client.GetAsync($Uri).GetAwaiter().GetResult()
+    $response.EnsureSuccessStatusCode() | Out-Null
+    $content = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+    if (-not $content) {
+      throw "empty response content"
+    }
+    return ($content | ConvertFrom-Json)
+  } finally {
+    $client.Dispose()
+    $handler.Dispose()
+  }
+}
+
 function Invoke-EastmoneyJson {
   param(
     [Parameter(Mandatory = $true)]
@@ -35,25 +66,9 @@ function Invoke-EastmoneyJson {
     } catch {
       $irmError = $_.Exception.Message
       try {
-        $curlArgs = @("-sS", "--connect-timeout", "20")
-        foreach ($key in $Headers.Keys) {
-          $curlArgs += @("-H", ("{0}: {1}" -f $key, $Headers[$key]))
-        }
-        $curlArgs += $Uri
-        $curlResult = Invoke-HiddenConsoleCommand -FilePath "curl.exe" -Arguments $curlArgs
-        $curlText = $curlResult.StdOut
-        if ($curlResult.ExitCode -eq 0 -and $curlText) {
-          return ($curlText | ConvertFrom-Json)
-        }
-        if ($curlResult.StdErr) {
-          $lastError = $curlResult.StdErr
-        } elseif ($curlText) {
-          $lastError = $curlText
-        } else {
-          $lastError = "curl exit code $($curlResult.ExitCode)"
-        }
+        return Invoke-JsonHttpFallback -Uri $Uri -Headers $Headers -TimeoutSec 20
       } catch {
-        $lastError = "$irmError; curl fallback: $($_.Exception.Message)"
+        $lastError = "$irmError; http fallback: $($_.Exception.Message)"
       }
       if ($attempt -ge $MaxAttempts) {
         throw "Eastmoney request failed after $attempt attempts: $lastError"
@@ -99,6 +114,67 @@ function Invoke-HiddenConsoleCommand {
     StdOut = $stdout
     StdErr = $stderr
   }
+}
+
+function ConvertTo-PowershellArgumentList {
+  param(
+    [hashtable]$Parameters = @{}
+  )
+
+  $args = New-Object System.Collections.Generic.List[string]
+  foreach ($entry in @($Parameters.GetEnumerator() | Sort-Object Name)) {
+    $name = [string]$entry.Key
+    $value = $entry.Value
+    if ($value -is [System.Management.Automation.SwitchParameter]) {
+      if ([bool]$value.IsPresent) {
+        $args.Add("-$name")
+      }
+      continue
+    }
+    if ($value -is [bool]) {
+      if ([bool]$value) {
+        $args.Add("-$name")
+      }
+      continue
+    }
+    if ($null -eq $value) {
+      continue
+    }
+    $args.Add("-$name")
+    $args.Add([string]$value)
+  }
+  return @($args)
+}
+
+function Invoke-HiddenPowershellScript {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ScriptPath,
+
+    [hashtable]$Parameters = @{}
+  )
+
+  if (-not (Test-Path -LiteralPath $ScriptPath)) {
+    throw "PowerShell script not found: $ScriptPath"
+  }
+
+  $powershell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+  $arguments = New-Object System.Collections.Generic.List[string]
+  $arguments.Add("-NoProfile")
+  $arguments.Add("-ExecutionPolicy")
+  $arguments.Add("Bypass")
+  $arguments.Add("-File")
+  $arguments.Add($ScriptPath)
+  foreach ($item in @(ConvertTo-PowershellArgumentList -Parameters $Parameters)) {
+    $arguments.Add([string]$item)
+  }
+
+  $result = Invoke-HiddenConsoleCommand -FilePath $powershell -Arguments @($arguments)
+  if ($result.ExitCode -ne 0) {
+    $detail = if ($result.StdErr) { $result.StdErr.Trim() } elseif ($result.StdOut) { $result.StdOut.Trim() } else { "exit code $($result.ExitCode)" }
+    throw "Hidden PowerShell script failed: $detail"
+  }
+  return $result
 }
 
 function New-MonitorContext {
@@ -184,10 +260,28 @@ function Get-HeldQuoteRows {
 
   if (-not $QuoteDataPath) {
     try {
-      $detailMap = Get-HeldQuoteDetailMap -Holdings $Holdings
-      Merge-HeldQuoteDetailFields -Rows $valid -DetailMap $detailMap
+      $detailMap = @{}
+      try {
+        $detailMap = Get-HeldQuoteDetailMap -Holdings $Holdings
+        if ($detailMap.Count -gt 0) {
+          Save-HeldQuoteDetailCache -DetailMap $detailMap | Out-Null
+        }
+      } catch {
+        # Detail flow fields are optional for report enrichment.
+      }
+
+      $cachedDetailMap = Get-LatestHeldQuoteDetailCacheMap -Codes @($Holdings | ForEach-Object { [string]$_.Code })
+      foreach ($code in $cachedDetailMap.Keys) {
+        if ((-not $detailMap.ContainsKey($code)) -or (-not (Test-HasResolvedMainFlowDetail -Detail $detailMap[$code]))) {
+          $detailMap[$code] = $cachedDetailMap[$code]
+        }
+      }
+
+      if ($detailMap.Count -gt 0) {
+        Merge-HeldQuoteDetailFields -Rows $valid -DetailMap $detailMap
+      }
     } catch {
-      # Detail flow fields are optional for report enrichment.
+      # Never let optional detail enrichment block the base quote snapshot.
     }
   }
 
@@ -203,6 +297,80 @@ function Get-HeldQuoteDetailMap {
   (Get-HeldQuoteDetailFetchResult -Holdings $Holdings).Map
 }
 
+function Get-DetailCacheRoot {
+  $projectRoot = Split-Path -Parent $PSScriptRoot
+  Join-Path $projectRoot "data\detail_cache"
+}
+
+function Save-HeldQuoteDetailCache {
+  param(
+    [Parameter(Mandatory = $true)]
+    [hashtable]$DetailMap
+  )
+
+  if ($DetailMap.Count -eq 0) {
+    return $null
+  }
+
+  $detailDir = Get-DetailCacheRoot
+  New-Item -ItemType Directory -Force -Path $detailDir | Out-Null
+  $detailFile = Join-Path $detailDir ("held_detail_runtime_{0}.json" -f (Get-Date -Format "yyyyMMdd_HHmmss"))
+  $items = foreach ($code in ($DetailMap.Keys | Sort-Object)) {
+    $detail = $DetailMap[$code]
+    [pscustomobject]@{
+      code = [string]$code
+      f137 = $detail.f137
+      f138 = $detail.f138
+      f139 = $detail.f139
+      f140 = $detail.f140
+      f141 = $detail.f141
+      f142 = $detail.f142
+      f143 = $detail.f143
+      f144 = $detail.f144
+      f145 = $detail.f145
+      f146 = $detail.f146
+      f147 = $detail.f147
+      f148 = $detail.f148
+      f149 = $detail.f149
+    }
+  }
+  $items | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $detailFile -Encoding UTF8
+  return $detailFile
+}
+
+function Get-LatestHeldQuoteDetailCacheMap {
+  param(
+    [string[]]$Codes = @()
+  )
+
+  $detailDir = Get-DetailCacheRoot
+  if (-not (Test-Path -LiteralPath $detailDir)) {
+    return @{}
+  }
+
+  $latestFile = Get-ChildItem -LiteralPath $detailDir -Filter "held_detail*.json" -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
+  if ($null -eq $latestFile) {
+    return @{}
+  }
+
+  try {
+    $raw = Get-Content -LiteralPath $latestFile.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+    $map = @{}
+    foreach ($item in @($raw)) {
+      $code = [string]$item.code
+      if ($Codes.Count -gt 0 -and $Codes -notcontains $code) {
+        continue
+      }
+      $map[$code] = $item
+    }
+    return $map
+  } catch {
+    return @{}
+  }
+}
+
 function Get-HeldQuoteDetailFetchResult {
   param(
     [Parameter(Mandatory = $true)]
@@ -216,6 +384,7 @@ function Get-HeldQuoteDetailFetchResult {
   $detailFields = "f137,f138,f139,f140,f141,f142,f143,f144,f145,f146,f147,f148,f149"
   $map = @{}
   $errors = New-Object System.Collections.Generic.List[string]
+  $needsRetry = New-Object System.Collections.Generic.List[object]
 
   foreach ($holding in $Holdings) {
     $uri = "https://push2.eastmoney.com/api/qt/stock/get?fltt=2&invt=2&fields=$detailFields&secid=$($holding.SecId)"
@@ -223,11 +392,29 @@ function Get-HeldQuoteDetailFetchResult {
       $response = Invoke-EastmoneyJson -Uri $uri -Headers $headers
       if ($response.data) {
         $map[[string]$holding.Code] = $response.data
+        if (-not (Test-HasResolvedMainFlowDetail -Detail $response.data)) {
+          $needsRetry.Add($holding)
+        }
       } else {
         $errors.Add("$($holding.Code): empty detail payload")
       }
     } catch {
       $errors.Add("$($holding.Code): $($_.Exception.Message)")
+    }
+  }
+
+  if ($needsRetry.Count -gt 0) {
+    Start-Sleep -Seconds 1
+    foreach ($holding in $needsRetry) {
+      $uri = "https://push2.eastmoney.com/api/qt/stock/get?fltt=2&invt=2&fields=$detailFields&secid=$($holding.SecId)"
+      try {
+        $retryResponse = Invoke-EastmoneyJson -Uri $uri -Headers $headers
+        if ($retryResponse.data -and (Test-HasResolvedMainFlowDetail -Detail $retryResponse.data)) {
+          $map[[string]$holding.Code] = $retryResponse.data
+        }
+      } catch {
+        # Keep the first-pass payload; the caller can still render partial data.
+      }
     }
   }
 
@@ -331,14 +518,26 @@ function Get-LatestSnapshotFile {
     [string]$SnapshotRoot
   )
 
-  $tradeDate = (Get-Date).ToString("yyyyMMdd")
-  $snapshotDir = Join-Path $SnapshotRoot $tradeDate
-  if (-not (Test-Path -LiteralPath $snapshotDir)) {
+  if (-not (Test-Path -LiteralPath $SnapshotRoot)) {
     return $null
   }
 
-  Get-ChildItem -LiteralPath $snapshotDir -Filter "snapshot_*.json" -ErrorAction SilentlyContinue |
-    Sort-Object Name |
+  $tradeDate = (Get-Date).ToString("yyyyMMdd")
+  $snapshotDir = Join-Path $SnapshotRoot $tradeDate
+  if (Test-Path -LiteralPath $snapshotDir) {
+    $sameDaySnapshot = Get-ChildItem -LiteralPath $snapshotDir -Filter "snapshot_*.json" -ErrorAction SilentlyContinue |
+      Sort-Object Name |
+      Select-Object -Last 1
+    if ($null -ne $sameDaySnapshot) {
+      return $sameDaySnapshot
+    }
+  }
+
+  Get-ChildItem -LiteralPath $SnapshotRoot -Directory -ErrorAction SilentlyContinue |
+    ForEach-Object {
+      Get-ChildItem -LiteralPath $_.FullName -Filter "snapshot_*.json" -ErrorAction SilentlyContinue
+    } |
+    Sort-Object LastWriteTime, FullName |
     Select-Object -Last 1
 }
 
@@ -658,4 +857,19 @@ function Get-MainFlowSummary {
   }
 
   "主力总流入：**$(Format-ColoredAbsoluteCny -Value $inflow -Color "red")** ｜ 主力总流出：**$(Format-ColoredAbsoluteCny -Value $outflow -Color "green")**"
+}
+
+function Test-HasResolvedMainFlowDetail {
+  param(
+    $Detail
+  )
+
+  if ($null -eq $Detail) {
+    return $false
+  }
+
+  $superResolved = Resolve-OrderInOut -Flow $Detail.f137 -In $Detail.f138 -Out $Detail.f139
+  $largeResolved = Resolve-OrderInOut -Flow $Detail.f140 -In $Detail.f141 -Out $Detail.f142
+
+  return ($superResolved.IsResolved -and $largeResolved.IsResolved)
 }

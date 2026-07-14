@@ -11,7 +11,7 @@ param(
 
   [Parameter(ParameterSetName = "Content")]
   [Parameter(ParameterSetName = "ContentPath")]
-  [ValidateSet("blue", "red", "orange", "green", "grey")]
+  [ValidateSet("blue", "red", "orange", "green", "grey", "purple")]
   [string]$Template = "blue",
 
   [Parameter(ParameterSetName = "Content")]
@@ -65,6 +65,25 @@ function Find-SettingsPath {
 }
 
 function Get-FeishuCredential {
+  if ($SettingsPath) {
+    if (-not (Test-Path -LiteralPath $SettingsPath)) {
+      throw "Feishu settings file not found: $SettingsPath"
+    }
+
+    $settings = Get-Content -LiteralPath $SettingsPath -Raw -Encoding UTF8
+    $webhookMatch = [regex]::Match($settings, 'webhook_url:\s*"([^"]+)"')
+    $secretMatch = [regex]::Match($settings, 'secret:\s*"([^"]+)"')
+
+    if (-not $webhookMatch.Success) {
+      throw "Feishu webhook is missing in settings."
+    }
+
+    return @{
+      Webhook = $webhookMatch.Groups[1].Value.Trim()
+      Secret = if ($secretMatch.Success) { $secretMatch.Groups[1].Value.Trim() } else { "" }
+    }
+  }
+
   $webhook = [Environment]::GetEnvironmentVariable("FEISHU_WEBHOOK_URL")
   $secret = [Environment]::GetEnvironmentVariable("FEISHU_SECRET")
 

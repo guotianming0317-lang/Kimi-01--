@@ -14,5 +14,11 @@ data/**/*.json
 data/**/*.md
 data/**/*.txt
 data/**/*.png
+data/**/*.yml
+data/**/*.yaml
 data/held_intraday_replay_*.csv
+data/auction_preview_demo/
+data/auction_preview_demo_final/
+data/auction_preview_demo_push/
+data/open_strength_preview_demo/
 *.tmp

@@ -22,7 +22,7 @@ Write-MonitorLog -LogFile $context.LogFile -Message "start"
 try {
   $replayScript = Join-Path $PSScriptRoot "Replay-PendingFeishuPushes.ps1"
   if (Test-Path -LiteralPath $replayScript) {
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $replayScript -QueueRoot $sharedPendingPushRoot | Out-Null
+    Invoke-HiddenPowershellScript -ScriptPath $replayScript -Parameters @{ QueueRoot = $sharedPendingPushRoot } | Out-Null
   }
 } catch {
   Write-MonitorLog -LogFile $context.LogFile -Message "pending replay skipped :: $($_.Exception.Message)"
@@ -122,19 +122,17 @@ if ($NoPush) {
 } else {
   try {
     $sendScript = Join-Path $PSScriptRoot "Send-FeishuCard.ps1"
-    $powershell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
-    & $powershell -NoProfile -ExecutionPolicy Bypass -File $sendScript `
-      -Title "⚠️ A股已持股份主力资金瞬时大额流动" `
-      -Template "orange" `
-      -ContentPath ([string]$alertFile) `
-      -QueueRoot ([string]$sharedPendingPushRoot)
-    if ($LASTEXITCODE -ne 0) {
-      throw "Feishu anomaly sender exited with code $LASTEXITCODE"
-    }
+    Invoke-HiddenPowershellScript -ScriptPath $sendScript -Parameters @{
+      Title = "⚠️ A股已持股份主力资金瞬时大额流动"
+      Template = "orange"
+      ContentPath = [string]$alertFile
+      QueueRoot = [string]$sharedPendingPushRoot
+    } | Out-Null
     Write-MonitorLog -LogFile $context.LogFile -Message "pushed anomaly $alertFile"
   } catch {
     Write-MonitorLog -LogFile $context.LogFile -Message "push failed anomaly $alertFile :: $($_.Exception.Message)"
-    throw
+    Write-Output "异常预警推送失败，已记录日志，等待后续自动补发。"
+    exit 0
   }
 }
 

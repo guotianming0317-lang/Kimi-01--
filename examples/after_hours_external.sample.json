@@ -1,0 +1,23 @@
+[
+  {
+    "code": "002594",
+    "source": "provider_name",
+    "supported": true,
+    "volume": 120000,
+    "amount": 1056000
+  },
+  {
+    "code": "300346",
+    "source": "provider_name",
+    "supported": true,
+    "volume": 0,
+    "amount": 0
+  },
+  {
+    "code": "688126",
+    "source": "provider_name",
+    "supported": false,
+    "volume": null,
+    "amount": null
+  }
+]
