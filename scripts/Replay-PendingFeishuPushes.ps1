@@ -12,6 +12,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "HeldStockMonitorShared.ps1")
 
 if (-not (Test-Path -LiteralPath $QueueRoot)) {
   Write-Output "No pending push queue found."
@@ -48,10 +49,7 @@ foreach ($queueFile in $queueFiles) {
   }
 
   try {
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $sendScript @params | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-      throw "Feishu sender exited with code $LASTEXITCODE"
-    }
+    Invoke-HiddenPowershellScript -ScriptPath $sendScript -Parameters $params | Out-Null
     Remove-Item -LiteralPath $queueFile.FullName -Force
     $replayed++
   } catch {

@@ -20,6 +20,8 @@ function Import-HeldStocks {
   foreach ($row in $rows) {
     $code = ([string]$row.Code).Trim()
     $name = ([string]$row.Name).Trim()
+    $focusLevel = Resolve-FocusLevel -Value $row.FocusLevel
+    $prevCloseMode = Resolve-PrevCloseMode -Value $row.PrevCloseMode
 
     if (-not ($code -match "^\d{6}$")) {
       throw "持仓清单存在无效股票代码：$code"
@@ -35,12 +37,52 @@ function Import-HeldStocks {
     $items += [pscustomobject]@{
       Code = $code
       Name = $name
+      FocusLevel = $focusLevel
+      PrevCloseMode = $prevCloseMode
       SecId = "$(Get-QuoteMarketPrefix $code).$code"
       ThsMarket = Get-ThsMarketCode $code
     }
   }
 
   return @($items)
+}
+
+function Resolve-FocusLevel {
+  param(
+    [AllowNull()]
+    [object]$Value
+  )
+
+  $text = ([string]$Value).Trim().ToLowerInvariant()
+  switch ($text) {
+    "high" { return "high" }
+    "重点" { return "high" }
+    "high_priority" { return "high" }
+    "normal" { return "normal" }
+    "普通" { return "normal" }
+    default {
+      if ($text) {
+        return "normal"
+      }
+      return "normal"
+    }
+  }
+}
+
+function Resolve-PrevCloseMode {
+  param(
+    [AllowNull()]
+    [object]$Value
+  )
+
+  $text = ([string]$Value).Trim().ToLowerInvariant()
+  switch ($text) {
+    "qfq" { return "qfq" }
+    "forward" { return "qfq" }
+    "forward_adjusted" { return "qfq" }
+    "前复权" { return "qfq" }
+    default { return "raw" }
+  }
 }
 
 function Get-QuoteMarketPrefix {

@@ -129,14 +129,11 @@ if ($NoPush) {
 }
 
 $sharedPendingPushRoot = Join-Path (Split-Path -Parent $PSScriptRoot) "data\pending_pushes"
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "Send-FeishuCard.ps1") `
-  -Title (U 'A\u80a1\u5df2\u6301\u80a1\u4efd\u8d44\u91d1\u52a8\u5411\u76d1\u63a7\uff5c15:00\u6536\u76d8\u8865\u53d1') `
-  -Template "blue" `
-  -ContentPath $reportFile `
-  -QueueRoot $sharedPendingPushRoot
-
-if ($LASTEXITCODE -ne 0) {
-  throw "Feishu sender exited with code $LASTEXITCODE"
-}
+Invoke-HiddenPowershellScript -ScriptPath (Join-Path $PSScriptRoot "Send-FeishuCard.ps1") -Parameters @{
+  Title = (U 'A\u80a1\u5df2\u6301\u80a1\u4efd\u8d44\u91d1\u52a8\u5411\u76d1\u63a7\uff5c15:00\u6536\u76d8\u8865\u53d1')
+  Template = "blue"
+  ContentPath = $reportFile
+  QueueRoot = $sharedPendingPushRoot
+} | Out-Null
 
 Write-Output ((U '\u6a21\u62df\u6536\u76d8\u8865\u53d1\u5df2\u53d1\u9001\uff1a{0}') -f $reportFile)

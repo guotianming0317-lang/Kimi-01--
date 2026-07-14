@@ -543,3 +543,391 @@
   - `【异常】本次未获取到有效行情，且没有可用快照回退`
 - 此时合计主力净额应显示：
   - `--`
+---
+
+### 14. 2026-07-01 codex/auction-monitoring 鍒嗘敮寮€鍙戣褰?
+
+#### 鍒嗘敮淇℃伅
+
+- 褰撳墠鍔熻兘鍒嗘敮锛?`codex/auction-monitoring`
+- 鏈℃槸鍦?`main` 涔嬪鐙珛鎼缓鐨勬柊鍔熻兘鍒嗘敮
+- 鐩墠杩樹笉鍚堝苟鍥?`main`
+- 鍘熷洜锛氶渶绛夊埌鏄庡ぉ浜ゆ槗鏃ョ敤鐪熷疄绔炰环鏁版嵁楠岃瘉閫氳繃鍚庡啀鍚堝苟
+
+#### 浠婂ぉ瀹屾垚鐨勬牳蹇冨姛鑳?
+
+1. 鏂板 A鑲￠泦鍚堢珵浠锋寔浠撶洃鎺ч摼璺?
+   - 寮€鐩樼珵浠风洃鎺х偣锛?`09:15`銆?`09:20`銆?`09:23`銆?`09:24:30`銆?`09:25`銆?`09:26`
+   - 灏剧洏绔炰环鐩戞帶鐐癸細`14:57`銆?`14:59`銆?`15:00`
+   - `09:26` 杈撳嚭寮€鐩樻渶缁堟姤鍛?
+   - `15:00` 杈撳嚭灏剧洏鏈€缁堟姤鍛?
+
+2. 鏂板绔炰环琛ュ緱鏈哄埗
+   - 鏂拌剼鏈細`scripts/Run-AuctionCatchUp.ps1`
+   - 鐢ㄤ簬鍦ㄧ珵浠风獥鍙ｆ湡鍐呮寜鍒嗛挓琛ュ彇蹇収
+   - 鐢ㄤ簬闃叉鐢佃剳鎴栫綉缁滅◢鏅氬氨缁悗锛屽畬鍏ㄩ敊杩囨煇涓珵浠风偣
+
+3. 鏂板绔炰环鍏辩敤閫昏緫涓庢祴璇?
+   - 鏂拌剼鏈細`scripts/AuctionMonitorShared.ps1`
+   - 鏂拌剼鏈細`scripts/Run-AuctionMonitor.ps1`
+   - 鏂版祴璇曪細`scripts/Tests/AuctionMonitor.Tests.ps1`
+
+4. 椋炰功鎺ㄩ€侀鏍艰皟鏁?
+   - 集合竞价推送改为绱壊椤跺簳锛岀敤浜庝笌鈥滃浐瀹氱洃鎺р€濆拰鈥滅灛鏃跺ぇ棰濆紓甯糕€濆仛鍖哄垎
+   - 鏍囬鍓嶆坊鍔犵传鑹插渾鐐瑰浘鏍?
+   - 涓轰簡閬垮厤 PowerShell 5.1 涔辩爜锛屽浘鏍囨敼涓鸿繍琛屾椂鐢?`[char]::ConvertFromUtf32(0x1F7E3)` 鍔ㄦ€佺敓鎴?
+
+5. 鎶ュ憡姝ｆ枃鏍峰紡鍗囩骇
+   - 涓偂鈥滃悕绉?+浠ｇ爜鈥濇敼涓虹传鑹诧紝骞跺姞绮?
+   - `[鍓嶅鏉僝 鏍囪瘑鏀逛负钃濊壊
+   - 鈥滃己搴﹁瘎鍒嗏€濇寜鍒嗘暟鍖洪棿鏄剧ず棰滆壊锛?
+     - `80-100` 绾㈣壊
+     - `50-79` 姗欒壊
+     - `0-49` 缁胯壊
+   - 鏂囨湰涓槑纭爣娉ㄢ€滃紑鐩樼珵浠风洃鎺р€濇垨鈥滃熬鐩樼珵浠风洃鎺р€?
+
+6. 绔炰环鈥滃墠澶嶆潈鈥濋€昏緫
+   - `data/holdings.csv` 鏂板 `PrevCloseMode`
+   - `002594 姣斾簹杩?` 宸茶涓?`qfq`
+   - `scripts/Holdings.ps1` 澧炲姞 `PrevCloseMode` 褰掍竴鍖栧鐞?
+   - `scripts/AuctionMonitorShared.ps1` 鍦?`qfq` 妯″紡涓嬩紭鍏堜娇鐢ㄥ墠澶嶆潈鏄ユ敹锛岄伩鍏嶆定璺屽箙璁＄畻澶辩湡
+   - 鎶ュ憡涓湪瀵瑰簲涓偂鍚嶇О鍚庢樉绀?`〔鍓嶅鏉僝`
+
+#### 浠婂ぉ宸查獙璇佺殑缁撴灉
+
+- 鐩稿叧 Pester 娴嬭瘯宸查€氳繃
+- 绱壊鏍囬鏍峰紡宸叉垚鍔熸帹閫佸埌椋炰功
+- 涓偂鈥滃悕绉?+浠ｇ爜鈥濈传鑹插姞绮楁樉绀哄凡鍦ㄩ涔︿腑楠岃瘉姝ｅ父
+- `[鍓嶅鏉僝` 钃濊壊鏍囪宸查獙璇佹甯?
+- 鐩稿叧鏁板瓧绮椾綋鏄剧ず宸查獙璇佹甯?
+
+#### 浠婂ぉ灏氭湭瀹屾垚鐨勬渶鍚庝竴姝?
+
+- 鏄庡ぉ浜ゆ槗鏃ラ渶鐢ㄧ湡瀹炵珵浠锋暟鎹仛涓€杞畬鏁撮獙璇?
+- 楂樹紭鍏堢骇楠岃瘉鐐癸細
+  - `09:15-09:26` 寮€鐩樼珵浠峰悇鏃堕棿鐐瑰揩鐓ф槸鍚﹀彲姝ｅ父钀藉湴
+  - `14:57-15:00` 灏剧洏绔炰环鏄惁鍙甯稿嚭鎶?
+  - `姣斾簹杩?002594` 鍓嶅鏉冩定璺屽箙鏄惁璁＄畻姝ｅ父
+  - `重点提醒` 鎺掑簭鏄惁绗﹀悎鐪嬩附涔犳儻
+  - `操作提示` 鏂囨鏄惁杩樺彲缁х画寰皟
+
+#### 缁撹
+
+浠婂ぉ鐨勫垎鏀紑鍙戝凡瀹屾垚涓昏鎼缓銆佹枃妗堝垏鎹€佹牱寮忚皟鏁淬€佸墠澶嶆潈鏀寔鍜屾祴璇曢獙璇併€?
+鐩墠鐘舵€侊細**鍙敤浜庢槑澶╁疄鐩樻暟鎹洖楠岋紝浣嗘殏涓嶅悎骞跺洖 `main`**銆?
+---
+
+### 15. 2026-07-02 10:30 鍥哄畾鐩戞帶涓や粙涓偂鈥滀富鍔涘€绘祦鍏? / 鎬绘祦鍑衡€濆瓧娈电己澶辨帓鏌?
+
+#### 闂鐜拌薄
+
+- 鐢ㄦ埛鍙嶉 `2026-07-02 10:30` 鍥哄畾鐩戞帶鎺ㄩ€佷腑锛?
+  - `涓法鑺?U锛?88549锛?
+  - `娌～浜т笟锛?88126锛?
+- 杩欎袱鍙偂绁ㄧ殑鈥滀富鍔涘€绘祦鍏? / 涓诲姏鎬绘祦鍑衡€濇樉绀轰负 `--`
+- 浣嗗叾浠栬鎯呭瓧娈碉紙涓诲姏鍑€棰濄€佹定璺屽箙銆佺壒澶у崟 / 澶у崟 / 涓皬鍗曪級鍧囨甯稿睍绀?
+
+#### 鑷缁撴灉
+
+- `10:30` 鍘熸姤鍛婃枃浠讹細
+  - `data/outbox/formal_replay_20260702_103026.md`
+- 蹇収鏂囦欢锛?
+  - `data/snapshots/20260702/snapshot_103026.json`
+- 鏌ョ湅蹇収鍙‘璁わ細
+  - `688549` 鍜?`688126` 鍦?`10:30` 鏃剁殑 `super_in / super_out / large_in / large_out` 鍧囦负 `null`
+  - 鍥犳鎶ュ憡涓樉绀?`--` 鏄鍚堝綋鏃舵暟鎹姸鎬佺殑锛屼笉鏄姤鍛婄粍瑁呮紡鍐?
+
+#### 鏍规湰鍘熷洜
+
+- 褰撴涓婚鎯呮帴鍙ｅ凡杩斿洖杩欎袱鍙偂绁ㄧ殑涓诲姏鍑€棰濈瓑鍩虹鏁版嵁
+- 浣嗙敤浜庤ˉ鍏呪€滀富鍔涘€绘祦鍏? / 鎬绘祦鍑衡€濈殑涓滆储璇︽儏鎺ュ彛鍦ㄥ綋鏃跺杩欎袱鍙偂绁ㄨ繑鍥炰簡绌哄€?
+- 鍥犳鏈闂灞炰簬锛?
+  - **璇︽儏琛ュ叏閾捐矾褰撴鎶栧姩**
+  - 涓嶆槸鎸佷粨婕忕洃鎺?
+  - 涓嶆槸绉戝垱鏉胯偂绁ㄦ案涔呬笉鏀寔
+
+#### 鐜板満楠岃瘉
+
+- 鍚庣画鍗曠嫭瀵?`688126` 鍜?`688549` 鎵ц涓滆储瀛楁鎺㈡祴锛岃幏寰楀埌鍙敤鐨勭湡瀹炶鎯呭瓧娈?
+- 鍙‘璁よ繖涓や釜鏍囩殑骞朵笉鏄棤娉曡幏鍙?鈥滀富鍔涘€绘祦鍏? / 鎬绘祦鍑衡€?
+- 璇存槑鏄?`10:30` 褰撴杩斿洖绌哄€硷紝鑰屼笉鏄案涔呮€х己瀛?
+
+#### 宸插畬鎴愪慨澶?
+
+- 淇敼鑴氭湰锛?
+  - `scripts/HeldStockMonitorShared.ps1`
+- 鏂板閫昏緫锛?
+  - 濡傛灉鏌愬彧鑲＄エ绗竴娆℃姄鍙栧埌鐨勮鎯呮槸绌哄€兼垨涓嶆弧瓒虫€绘祦鍏? / 鎬绘祦鍑烘帹瀵兼潯浠?
+  - 鍒欒嚜鍔ㄥ璇ヨ偂绁ㄥ啀琛ヤ竴娆¤鎯呮姄鍙?
+- 鐩爣锛?
+  - 闄嶄綆鈥滈儴鍒嗚偂绁ㄨ鎯呮湁锛屼絾鎬绘祦鍏? / 鎬绘祦鍑虹己澶扁€濈殑姒傜巼
+
+#### 娴嬭瘯缁撴灉
+
+- 娴嬭瘯鑴氭湰锛?
+  - `scripts/Tests/Holdings.Tests.ps1`
+- 鏂板楠岃瘉锛?
+  - 瀹屾暣璇︽儏搴斿垽瀹氫负鍙敤
+  - 绌鸿鎯呭簲鍒ゅ畾涓洪渶瑕侀噸璇?
+- 杩愯缁撴灉锛?
+  - `All holdings tests passed.`
+
+#### 琛ュ彂鎯呭喌
+
+- 鏈鏈敤 `10:43+` 鐨勫疄鏃舵暟鍊煎幓鍐掑厖 `10:30` 鍘嗗彶鏁板€?
+- 鍘熷洜锛氳繖鏍蜂細鎶婅ˉ鍙戞枃妗堝彉鎴愨€滃綋鍓嶅€肩偣鈥濊€屼笉鏄€?10:30 鍘熷鍙ｅ緞鈥?
+- 鍥犳鏀逛负鍙戦€佷竴鏉♀€滅己澶卞瓧娈垫疆鍏呰鏄庘€濓細
+  - `data/outbox/formal_replay_20260702_103026_supplement.md`
+- 璇ユ潯琛ュ厖璇存槑宸叉垚鍔熷彂閫佸埌椋炰功
+- 鏂囦腑鏄庣‘璇存槑锛?
+  - `10:30` 褰撴缂哄け鍘熷洜
+  - 脚本已修复为自动二次补抓
+  - 当前实时回读值仅用于确认链路恢复锛屼笉绛夊悓浜?`10:30` 鍘嗗彶鍊?
+---
+
+### 16. 2026-07-02 集合竞价推送分流到新飞书群
+
+#### 变更背景
+
+- 用户反馈当前消息过于密集
+- 决定将“集合竞价”相关推送单独发到新建飞书群
+- 原固定监控与异常预警仍保留在原群，不做迁移
+
+#### 新 webhook
+
+- 集合竞价专用 webhook：
+  - `https://open.feishu.cn/open-apis/bot/v2/hook/93d30616-6e73-40ba-a569-8f9263430cc1`
+
+#### 本次调整内容
+
+1. 新增本地配置文件
+   - `data/auction_feishu.settings.yml`
+   - 仅供集合竞价链路读取
+
+2. 调整发送优先级
+   - 文件：`scripts/Send-FeishuCard.ps1`
+   - 修正为：如果显式传入 `-SettingsPath`
+   - 则优先使用该设置文件中的 webhook / secret
+   - 不再被环境变量中的默认飞书配置覆盖
+
+3. 调整集合竞价发送链路
+   - 文件：
+     - `scripts/Run-AuctionMonitor.ps1`
+     - `scripts/Run-AuctionCatchUp.ps1`
+   - 逻辑：
+     - 若存在 `data/auction_feishu.settings.yml`
+     - 则集合竞价推送与补跑推送都使用该配置文件
+     - 否则回退到原默认发送方式
+
+4. 集合竞价上下文补充
+   - 文件：`scripts/AuctionMonitorShared.ps1`
+   - 新增集合竞价专用设置文件路径注入
+
+#### 验证结果
+
+- `scripts/Tests/AuctionMonitor.Tests.ps1`
+  - 运行结果：`All auction monitor tests passed.`
+- 已人工发送一条“集合竞价分流测试”到新群
+- 用户确认：**已收到**
+
+#### 当前分流规则
+
+- 集合竞价相关推送：
+  - 发往新群
+- 固定监控 / 异常预警：
+  - 继续发往原群
+
+#### 备注
+
+- `data/auction_feishu.settings.yml` 位于 `data/` 目录下
+- 该目录已在 `.gitignore` 范围内
+- 因此属于本地运行配置，不会混入主线版本库
+## 2026-07-03 集合竞价漏发排查与修复
+
+### 现象
+
+- 用户今天只收到一条“分流测试”消息，没有收到真实的集合竞价数据推送。
+- 该“分流测试”消息不是今日实时推送，而是前一日为了验证新群分流所做的人为测试。
+
+### 排查结论
+
+- `data/auction_open/logs/auction_open.log` 显示：
+  - `2026-07-03 09:15` 成功保存了 `snapshot_open_0915.json`
+  - `09:20 / 09:23 / 09:24:30 / 09:25 / 09:26` 都有 `start open checkpoint=...`
+  - 但这些检查点后面没有继续出现 `snapshot saved` / `pushed`
+- 说明不是定时任务没触发，而是脚本在运行过程中中断。
+
+### 根因
+
+- 集合竞价脚本在每个检查点都会调用 `push2his.eastmoney.com`
+- 该接口用于拉取：
+  - 昨收参考值
+  - 昨日成交额
+  - 近 5 日平均成交额
+  - 前复权股票参考收盘价
+- 今天复跑 `Run-AuctionMonitor.ps1` 的 `0920` / `0926` 检查点时，稳定复现：
+  - `Eastmoney request failed after 3 attempts`
+  - `Failed to connect to push2his.eastmoney.com port 443`
+- 因旧逻辑会直接抛错退出，所以 `09:20` 之后真实推送链路中断。
+
+### 修复策略
+
+1. 为集合竞价增加“当日参考数据缓存”
+   - 路径：`auction_open/cache/daily_metrics_YYYYMMDD.json`
+   - `auction_close` 同样适用
+
+2. 将参考数据获取改为“缓存优先兜底”
+   - 若本地缓存已完整覆盖持仓股票，则后续检查点直接使用缓存
+   - 若实时拉取成功，则更新缓存
+   - 若实时拉取失败，则优先回退到缓存
+   - 若缓存也不存在，则允许部分字段为空，但不再因为该接口失败导致整段报告中断
+
+3. 为前复权股票增加容错
+   - 有缓存时继续使用缓存中的 `prev_close`
+   - 无缓存时允许为空，但不阻断整份集合竞价报告
+
+4. 优化超时行为
+   - 当历史参考接口第一次失败后，不再对后续所有股票逐只重复慢重试
+   - 避免把 `09:20-09:26` 的定时监控窗口整体拖死
+
+### 代码改动
+
+- `scripts/AuctionMonitorShared.ps1`
+  - 新增：
+    - `DailyMetricsCachePath`
+    - `ConvertTo-AuctionMetricMap`
+    - `Read-AuctionDailyMetricsCache`
+    - `Save-AuctionDailyMetricsCache`
+  - `Get-AuctionDailyMetricsMap`
+    - 支持缓存读取
+    - 支持接口失败回退缓存
+    - 接口失败后停止逐股重复慢重试
+  - `Get-AuctionQuoteRows`
+    - 新增 `-CachePath`
+
+- `scripts/Run-AuctionMonitor.ps1`
+  - 调用集合竞价抓取时传入 `DailyMetricsCachePath`
+
+- `scripts/Run-AuctionCatchUp.ps1`
+  - 补跑链路同样使用缓存兜底
+
+- `scripts/Tests/AuctionMonitor.Tests.ps1`
+  - 新增断网/缓存兜底场景测试
+  - 覆盖前复权股票在参考接口失败时的回退行为
+
+### 验证结果
+
+- `scripts/Tests/AuctionMonitor.Tests.ps1`
+  - 通过：`All auction monitor tests passed.`
+
+- `scripts/Tests/OpenStrengthMonitor.Tests.ps1`
+  - 通过：`All open strength monitor tests passed.`
+
+### 备注
+
+- 在当前 Codex 受限运行环境中，`push2.eastmoney.com` 也可能被网络层拦截，因此这里无法直接代替用户本机完成真实补发验证。
+- 但“集合竞价因 `push2his` 断连而整段退出”的老问题已经完成结构性修复。
+
+---
+
+## 2026-07-06 新规适配记录
+
+### 目标
+
+适配 2026-07-06 起实施的 A 股收盘新规：
+
+- 保留 `14:57—15:00` 收盘集合竞价监控
+- 新增 `15:05—15:30` 盘后固定价格交易监控
+- 防止把盘后固定价格交易误判成收盘集合竞价
+- 修正主板 `ST / *ST` 涨跌停计算口径为 `10%`
+
+### 本次实际改动
+
+- `scripts/AuctionMonitorShared.ps1`
+  - 新增 `after_hours` 会话支持
+  - 新增收盘集合竞价与盘后固定价格交易的独立报告结构
+  - 新增 `regular_session_amount / closing_auction_amount / after_hours_amount / total_day_amount`
+  - 收盘标题统一为：`A股持仓收盘集合竞价监控`
+  - “补跑说明”改为只在手动预览中显示
+
+- `scripts/Run-AuctionMonitor.ps1`
+  - 收盘集合竞价仍由 `15:00` 采集完成
+  - 正式推送延后到 `15:01`
+
+- `scripts/Run-AfterHoursFixedPriceReport.ps1`
+  - 新增 `15:31` 盘后固定价格交易报告执行入口
+
+- `scripts/Run-AuctionCatchUp.ps1`
+  - 继续兼容尾盘补跑链路
+
+- `scripts/Install-WindowsFundPushTasks.ps1`
+  - 重新安装并加入 `AStockAfterHoursFixed-1531`
+
+### 验证结果
+
+- `scripts/Tests/AuctionMonitor.Tests.ps1`
+  - 通过：`All auction monitor tests passed.`
+
+- `scripts/Tests/OpenStrengthMonitor.Tests.ps1`
+  - 通过：`All open strength monitor tests passed.`
+
+- 计划任务重装成功：
+  - `AStockAuctionClose-1457`
+  - `AStockAuctionClose-1459`
+  - `AStockAuctionClose-1500`
+  - `AStockAfterHoursFixed-1531`
+
+### 当天观察结果
+
+- `15:31` 盘后固定价格交易报告链路可以成功生成
+- 但 2026-07-06 当天数据源未返回 `15:05—15:30` 明细
+- 因此盘后报告按预期显示：`数据源暂不支持盘后固定价格交易数据`
+
+### 后续待观察
+
+下一交易日重点确认：
+
+1. `15:01` 收盘集合竞价是否按新版口径自动发送
+2. `15:31` 盘后固定价格交易是否自动发送
+3. 数据源是否开始返回真实的 `15:05—15:30` 盘后成交数据
+## 2026-07-07 diagnosis and repair
+
+### Symptoms
+
+- `2026-07-07` open-auction push at `09:26` did not complete.
+- `9:40` open-strength report showed many `--` fields even though later local snapshots contained values.
+- fixed funds report sometimes lost `主力总流入 / 主力总流出`.
+- anomaly chain showed a visible error during the trading session.
+
+### Root causes
+
+1. Eastmoney quote requests failed repeatedly during the opening-auction window with `curl: (56) Failure when receiving data from the peer`, so the old `auction_open` path never reached a usable `09:26` report.
+2. `open_strength` had refreshed capture data, but an earlier report had already been generated from stale snapshot files; the report and snapshots were out of sync.
+3. fixed funds reporting was too sensitive to optional detail enrichment. If Eastmoney detail fields or local detail-cache merge had an issue, the whole quote path could lose its snapshot opportunity. Also, some stocks truly return `"-"` for in/out detail legs, so those totals cannot be fabricated safely.
+4. anomaly monitoring itself stayed alive; the visible failure was a transient Feishu send error, not a broken anomaly detector.
+
+### Repairs applied
+
+- `scripts/OpenStrengthMonitorShared.ps1`
+  - added stronger fallbacks for `open_price` and `current_price` using trend bars
+  - report generation now works correctly when fed refreshed `0930` and `0940` snapshots
+- `scripts/Run-OpenStrengthCapture.ps1`
+  - now reuses `data/auction_open/cache/daily_metrics_YYYYMMDD.json`
+- `scripts/Run-FormalReplayPush.ps1`
+  - `-NoPush` now skips pending-message replay, so dry-run checks stay side-effect free
+- `scripts/HeldStockMonitorShared.ps1`
+  - detail enrichment now has an outer safety wrapper and can no longer block the base quote snapshot path
+  - runtime detail cache continues to be used as a best-effort fallback for `主力总流入 / 主力总流出`
+
+### Verification
+
+- regenerated `9:40` report after refreshed captures and confirmed the missing `prev_close`, `open_price`, `current_price`, and amount-ratio fields were restored
+- `OpenStrengthMonitor.Tests.ps1` passed
+- `AuctionMonitor.Tests.ps1` passed
+- `Holdings.Tests.ps1` passed
+- live anomaly dry-run completed with `未触发异常预警`
+
+### Remaining reality
+
+- if Eastmoney detail fields for a stock still return literal `"-"` on both in/out legs, the report should keep `--` for totals
+- the opening-auction fix is code-complete, but the real proof will be the next live `09:26` trading-session run

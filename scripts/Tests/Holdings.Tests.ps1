@@ -26,11 +26,11 @@ $testDir = New-TestDir
 try {
   $holdingsPath = Join-Path $testDir "holdings.csv"
   @"
-Code,Name
-002594,比亚迪
-600021,上海电力
-002594,比亚迪
-688126,沪硅产业
+Code,Name,PrevCloseMode
+002594,比亚迪,qfq
+600021,上海电力,
+002594,比亚迪,qfq
+688126,沪硅产业,
 "@ | Set-Content -LiteralPath $holdingsPath -Encoding UTF8
 
   $holdings = @(Import-HeldStocks -Path $holdingsPath)
@@ -38,6 +38,7 @@ Code,Name
   Assert-True (($holdings | Where-Object Code -eq "002594").SecId -eq "0.002594") "深市股票应使用 0 前缀。"
   Assert-True (($holdings | Where-Object Code -eq "600021").SecId -eq "1.600021") "沪市股票应使用 1 前缀。"
   Assert-True (($holdings | Where-Object Code -eq "688126").ThsMarket -eq "USHA") "科创板应写入同花顺沪市 market。"
+  Assert-True (($holdings | Where-Object Code -eq "002594").PrevCloseMode -eq "qfq") "持仓清单应支持前复权昨收口径。"
 
   $shortSpecs = @(New-FeishuMessageSpecs -Title "测试标题" -Content "第一段`n第二段")
   Assert-True ($shortSpecs.Count -eq 1) "短消息应保持为单条飞书推送。"
@@ -127,6 +128,8 @@ Code,Name
   Assert-True ((Get-MainFlowSummary -MainFlow 83252700 -SuperFlow 0 -SuperIn 0 -SuperOut 2 -LargeFlow $null -LargeIn $null -LargeOut 88.12) -eq "主力总流入：**--** ｜ 主力总流出：**--**") "不满足基础反推条件的总流入/总流出应视为无效数据。"
   Assert-True ((Get-MainFlowSummary -MainFlow 1991437 -SuperFlow 0 -SuperIn "-" -SuperOut "-" -LargeFlow 1991437 -LargeIn 13883780 -LargeOut 11892343) -match "1,388.38万元.*1,189.23万元") "特大单双缺失且净额为零时，应能回推出 0/0 并保留总流入总流出。"
   Assert-True ((Get-MainFlowSummary -MainFlow -1864014 -SuperFlow -1033045 -SuperIn "-" -SuperOut 1033045 -LargeFlow -830969 -LargeIn 3588341 -LargeOut 4419310) -match "358.83万元.*545.24万元") "单侧缺失时应可结合净额反推主力总流入总流出。"
+  Assert-True ((Test-HasResolvedMainFlowDetail -Detail ([pscustomobject]@{ f137 = -344750784; f138 = 1016782848; f139 = 1210086656; f140 = -193303808; f141 = 1339673712; f142 = 1491120688 })) -eq $true) "完整主力明细应被识别为可用。"
+  Assert-True ((Test-HasResolvedMainFlowDetail -Detail ([pscustomobject]@{ f137 = -51512448; f138 = $null; f139 = $null; f140 = -10026080; f141 = $null; f142 = $null })) -eq $false) "缺少总流入总流出时应被识别为需要重试。"
   Assert-True ($report -match "上海电力（600021）") "固定监控报告应包含上海电力。"
   Assert-True ($report -match "<font color=""green"">-1.38亿元</font>") "固定监控报告应将净流出标为绿色。"
   Assert-True ($report.IndexOf("沪硅产业") -lt $report.IndexOf("上海电力")) "完整持有列表应按主力净额从流入到流出排序。"
@@ -195,6 +198,27 @@ Code,Name
   $fallbackReport = Get-Content -LiteralPath $fallbackReportFile.FullName -Raw -Encoding UTF8
   Assert-True ($fallbackReport -match "【降级】") "降级报告应明确标注已回退到最近快照。"
   Assert-True ($fallbackReport -match "比亚迪") "降级报告应仍然包含快照中的持仓数据。"
+
+  $crossDayFallbackRoot = Join-Path $testDir "cross_day_fallback_data"
+  $previousTradeDate = (Get-Date).AddDays(-1).ToString("yyyyMMdd")
+  $crossDaySnapshotDir = Join-Path $crossDayFallbackRoot "snapshots\$previousTradeDate"
+  New-Item -ItemType Directory -Force -Path $crossDaySnapshotDir | Out-Null
+  $previousSnapshot | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $crossDaySnapshotDir "snapshot_235959.json") -Encoding UTF8
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner `
+    -HoldingsPath $holdingsPath `
+    -DataRoot $crossDayFallbackRoot `
+    -QuoteDataPath (Join-Path $testDir "missing_quotes_cross_day.json") `
+    -NoPush | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "跨日快照回退场景应成功生成降级报告，退出码 $LASTEXITCODE"
+  }
+  $crossDayFallbackReportFile = Get-ChildItem -LiteralPath (Join-Path $crossDayFallbackRoot "outbox") -Filter "*.md" |
+    Where-Object { $_.Name -notlike "anomaly_alert_*" } |
+    Select-Object -First 1
+  Assert-True ($null -ne $crossDayFallbackReportFile) "跨日快照回退场景应生成报告。"
+  $crossDayFallbackReport = Get-Content -LiteralPath $crossDayFallbackReportFile.FullName -Raw -Encoding UTF8
+  Assert-True ($crossDayFallbackReport -match "【降级】") "跨日快照回退场景也应明确标注降级。"
+  Assert-True ($crossDayFallbackReport -match "比亚迪") "跨日快照回退场景应保留最近一次成功快照中的持仓数据。"
 
   $sanitizedError = Get-UserFriendlyReportError 'Eastmoney request failed after 3 attempts: 基础连接已经关闭: 连接被意外关闭。; curl fallback: 传入的对象无效，应为“:”或“}”。 (190): {"rc":0,"data":{"diff":[{"f14":"姣斾簹杩?"}]}}'
   Assert-True ($sanitizedError -eq "连接被远端中断。；curl 兜底失败：返回内容解析失败。") "用户可见错误信息应去掉原始乱码载荷。"

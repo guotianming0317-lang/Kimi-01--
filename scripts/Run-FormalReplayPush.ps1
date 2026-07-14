@@ -18,13 +18,15 @@ if (Test-MonitorPaused -PauseFlag $context.PauseFlag) {
 
 Write-MonitorLog -LogFile $context.LogFile -Message "start"
 
-try {
-  $replayScript = Join-Path $PSScriptRoot "Replay-PendingFeishuPushes.ps1"
-  if (Test-Path -LiteralPath $replayScript) {
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $replayScript -QueueRoot $sharedPendingPushRoot | Out-Null
+if (-not $NoPush) {
+  try {
+    $replayScript = Join-Path $PSScriptRoot "Replay-PendingFeishuPushes.ps1"
+    if (Test-Path -LiteralPath $replayScript) {
+      Invoke-HiddenPowershellScript -ScriptPath $replayScript -Parameters @{ QueueRoot = $sharedPendingPushRoot } | Out-Null
+    }
+  } catch {
+    Write-MonitorLog -LogFile $context.LogFile -Message "pending replay skipped :: $($_.Exception.Message)"
   }
-} catch {
-  Write-MonitorLog -LogFile $context.LogFile -Message "pending replay skipped :: $($_.Exception.Message)"
 }
 
 $holdings = @(Import-HeldStocks -Path $HoldingsPath)
@@ -184,19 +186,17 @@ if ($NoPush) {
 } else {
   try {
     $sendScript = Join-Path $PSScriptRoot "Send-FeishuCard.ps1"
-    $powershell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
-    & $powershell -NoProfile -ExecutionPolicy Bypass -File $sendScript `
-      -Title ([string]$title) `
-      -Template ([string]$template) `
-      -ContentPath ([string]$file) `
-      -QueueRoot ([string]$sharedPendingPushRoot)
-    if ($LASTEXITCODE -ne 0) {
-      throw "Feishu sender exited with code $LASTEXITCODE"
-    }
+    Invoke-HiddenPowershellScript -ScriptPath $sendScript -Parameters @{
+      Title = [string]$title
+      Template = [string]$template
+      ContentPath = [string]$file
+      QueueRoot = [string]$sharedPendingPushRoot
+    } | Out-Null
     Write-MonitorLog -LogFile $context.LogFile -Message "pushed $file"
   } catch {
     Write-MonitorLog -LogFile $context.LogFile -Message "push failed $file :: $($_.Exception.Message)"
-    throw
+    Write-Output "资金报告推送失败，已记录日志，等待后续自动补发。"
+    exit 0
   }
 }
 
