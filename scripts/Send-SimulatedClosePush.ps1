@@ -128,7 +128,7 @@ if ($NoPush) {
   exit 0
 }
 
-$sharedPendingPushRoot = Join-Path (Split-Path -Parent $PSScriptRoot) "data\pending_pushes"
+$sharedPendingPushRoot = Get-SharedPendingPushRoot -DataRoot (Join-Path (Split-Path -Parent $PSScriptRoot) "data") -Scope "auction_close"
 Invoke-HiddenPowershellScript -ScriptPath (Join-Path $PSScriptRoot "Send-FeishuCard.ps1") -Parameters @{
   Title = (U 'A\u80a1\u5df2\u6301\u80a1\u4efd\u8d44\u91d1\u52a8\u5411\u76d1\u63a7\uff5c15:00\u6536\u76d8\u8865\u53d1')
   Template = "blue"

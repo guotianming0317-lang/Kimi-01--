@@ -4,6 +4,7 @@ param(
   [string]$TradeDate = (Get-Date -Format "yyyy-MM-dd"),
   [string]$AfterHoursDataPath = "",
   [string]$TrendDataPath = "",
+  [switch]$Final,
   [switch]$NoPush
 )
 
@@ -64,7 +65,12 @@ try {
   $reportJson | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $reportJsonPath -Encoding UTF8
 
   $report = New-AfterHoursReportContent -TradeDate $TradeDate -Assessments $assessments
-  $reportPath = Join-Path $context.Outbox ("after_hours_fixed_report_{0}.md" -f (Get-Date -Format "yyyyMMdd_HHmmss"))
+  $reportName = if ($Final) {
+    "after_hours_fixed_report_{0}_final.md" -f (Get-Date -Format "yyyyMMdd_HHmmss")
+  } else {
+    "after_hours_fixed_report_{0}.md" -f (Get-Date -Format "yyyyMMdd_HHmmss")
+  }
+  $reportPath = Join-Path $context.Outbox $reportName
   $encoding = New-Object System.Text.UTF8Encoding($true)
   [System.IO.File]::WriteAllText($reportPath, $report, $encoding)
 

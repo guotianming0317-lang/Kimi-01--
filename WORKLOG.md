@@ -695,8 +695,7 @@
 
 #### 新 webhook
 
-- 集合竞价专用 webhook：
-  - `https://open.feishu.cn/open-apis/bot/v2/hook/93d30616-6e73-40ba-a569-8f9263430cc1`
+- 集合竞价专用 webhook：已配置在本机设置文件/环境变量中，日志不保存真实地址。
 
 #### 本次调整内容
 
@@ -931,3 +930,71 @@
 
 - if Eastmoney detail fields for a stock still return literal `"-"` on both in/out legs, the report should keep `--` for totals
 - the opening-auction fix is code-complete, but the real proof will be the next live `09:26` trading-session run
+---
+
+## 2026-07-17 Cross-Day Replay Incident
+
+- Symptom:
+  - Around 13:00 on 2026-07-17, Feishu received two copies of the previous trading day's closing auction monitor message.
+- Root cause:
+  - The 2026-07-16 close-auction push failed at 15:01 because of Feishu frequency limiting and was queued into `data/pending_pushes/`.
+  - Morning replay deferral correctly prevented the old message from appearing during the opening-session reports.
+  - In the afternoon, both `Run-FormalReplayPush.ps1` and `Run-AnomalyMonitor.ps1` invoked `Replay-PendingFeishuPushes.ps1`.
+  - The replay queue previously had no file-level lock, so two scheduled tasks could read and resend the same queued item at nearly the same time.
+- Evidence:
+  - `data/auction_close/logs/auction_close.log` shows `2026-07-16 15:01:05 error close checkpoint=1500 ... frequency limited`
+  - `scripts/Run-FormalReplayPush.ps1` and `scripts/Run-AnomalyMonitor.ps1` both replay pending pushes before their own reporting logic.
+- Fix:
+  - Added queue-file claiming in `scripts/Replay-PendingFeishuPushes.ps1`
+  - Replay now renames `queued_push_*.json` to `*.processing.json` before sending
+  - Only the process that successfully renames the file can send it
+  - If replay is deferred or send fails, the file is restored back to `.json`
+- Result:
+  - Cross-day queued pushes will not be duplicated by concurrent scheduled tasks
+  - Any queued push whose queue date is earlier than the current local date is dropped immediately
+  - No pending message may cross a calendar day, even if the original failure was caused by rate limiting
+- Validation:
+  - `scripts/Tests/QueuedPushReplay.Tests.ps1`
+  - `scripts/Tests/AuctionMonitor.Tests.ps1`
+
+## 2026-07-23 Cross-Day Replay Policy Hardening
+
+- Replaced the old morning-deferral behavior in `scripts/Replay-PendingFeishuPushes.ps1` with an unconditional stale-date check.
+- A queued item from any previous calendar date is deleted when discovered and is never sent.
+- Verified with a simulated 2026-07-23 replay run against the stale 2026-07-21 auction-close queue item; it was dropped and `Replayed pending pushes: 0` was returned.
+- This prevents delayed fixed reports, auction reports, anomaly reports, and other queued Feishu messages from appearing on a later trading day.
+
+---
+
+## 2026-07-17 Tushare After-Hours Amount Unit Fix
+
+- Symptom:
+  - The after-hours fixed-price report showed unrealistically small after-hours traded amounts, for example BYD displayed `0.47万元`.
+- Root cause:
+  - Tushare Pro after-hours volume is expressed in lots (`手`)
+  - Tushare Pro after-hours amount is expressed in thousand CNY (`千元`)
+  - The project previously treated `after_hours_amount` as CNY, so the displayed amount was 1000x too small.
+- Evidence:
+  - BYD sample row:
+    - close = `90.18`
+    - after_hours_volume = `517`
+    - after_hours_amount = `4662.306`
+  - Cross-check:
+    - `90.18 × 517 × 100 = 4,662,306 CNY`
+    - `4662.306 × 1000 = 4,662,306 CNY`
+  - This proves the imported Tushare amount must be multiplied by `1000`.
+- Fix:
+  - `scripts/TushareAfterHoursShared.ps1`
+    - convert `after_hours_amount` from thousand CNY into CNY at import time
+  - `scripts/AuctionMonitorShared.ps1`
+    - annotate after-hours volume as `手`
+  - `data/after_hours_external.latest.json`
+    - corrected the locally cached historical Tushare sample values to CNY
+- Result:
+  - BYD after-hours line now renders as:
+    - `15:05—15:30盘后成交量：517 手`
+    - `15:05—15:30盘后成交额：466.23万元`
+- Validation:
+  - `scripts/Tests/TushareAfterHours.Tests.ps1`
+  - `scripts/Tests/AuctionMonitor.Tests.ps1`
+  - `scripts/Tests/OpenStrengthMonitor.Tests.ps1`

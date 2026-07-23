@@ -440,3 +440,26 @@
 - `Get-HeldQuoteRows` now treats detail enrichment as optional end-to-end. Even if Eastmoney detail fields or local detail-cache merge fail, base quotes should still continue and snapshots can still be written.
 - `主力总流入 / 主力总流出` still depends on Eastmoney detail fields. If the source returns literal `"-"` for both in/out legs on a stock, the report intentionally keeps `--` instead of fabricating totals.
 - `anomaly_monitor` was healthy on 2026-07-07 overall; the visible error was a transient Feishu send failure at `10:05`, not a broken anomaly detection chain.
+## 2026-07-17 Replay Constraint
+
+- Cross-day pending Feishu messages must be protected against concurrent replay.
+- The project now relies on queue-file claiming inside `scripts/Replay-PendingFeishuPushes.ps1`:
+  - `queued_push_*.json` is renamed to `*.processing.json` before send
+  - only the task that claims the file may process it
+  - failed or deferred replay restores the file back to `.json`
+- This protection is required because both:
+  - `scripts/Run-FormalReplayPush.ps1`
+  - `scripts/Run-AnomalyMonitor.ps1`
+  replay pending pushes when they start.
+- Previous-day queued messages are now stale immediately and must be dropped on replay; they must never be deferred into a later session or sent across trading dates.
+
+## 2026-07-17 After-Hours Unit Constraint
+
+- For Tushare Pro after-hours data:
+  - `after_hours_volume` is in `手`
+  - `after_hours_amount` is in `千元`
+- The project standard output unit is:
+  - volume displayed as `手`
+  - amount stored and formatted as `元`
+- Therefore `scripts/TushareAfterHoursShared.ps1` must multiply imported Tushare `after_hours_amount` by `1000` before downstream reporting.
+- If a future refactor touches after-hours import or report formatting, preserve this conversion rule or the report will understate after-hours traded amount by 1000x.

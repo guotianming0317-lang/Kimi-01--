@@ -13,6 +13,10 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "AuctionMonitorShared.ps1")
 
+function U([string]$Value) {
+  return [System.Text.RegularExpressions.Regex]::Unescape($Value)
+}
+
 $context = $null
 try {
   $sessionConfig = Get-AuctionSessionConfig -Session $Session
@@ -90,9 +94,14 @@ try {
       Write-Output ("Catch-up report generated but push deferred until {0}" -f $pushNotBefore.ToString("HH:mm:ss"))
       exit 0
     }
+    if (Test-AuctionFinalReportExists -Outbox $context.Outbox -Session $Session -CurrentTime $CurrentTime) {
+      Write-MonitorLog -LogFile $context.LogFile -Message "catchup final push skipped $Session current_time=$($CurrentTime.ToString('HH:mm:ss')) final report appeared before send"
+      Write-Output "Final auction report already exists before catch-up send; skipping duplicate catch-up push."
+      exit 0
+    }
     $sendScript = Join-Path $PSScriptRoot "Send-FeishuCard.ps1"
     $icon = [char]::ConvertFromUtf32(0x1F7E3)
-    $title = $icon + "[" + $sessionConfig.Title + "补跑] " + $tradeDate
+    $title = $icon + "[" + $sessionConfig.Title + (U '\u8865\u8dd1') + "] " + $tradeDate
     $sendParams = @{
       Title = [string]$title
       Template = "purple"

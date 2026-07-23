@@ -110,8 +110,12 @@ function New-AuctionContext {
   $context = New-MonitorContext -DataRoot $root -LogName $logName
   $dateDir = Join-Path $context.SnapshotRoot (Get-Date -Format "yyyyMMdd")
   New-Item -ItemType Directory -Force -Path $dateDir | Out-Null
-  $sharedPendingPushRoot = Join-Path $DataRoot "pending_pushes"
-  New-Item -ItemType Directory -Force -Path $sharedPendingPushRoot | Out-Null
+  $pendingScope = switch ($Session) {
+    "open" { "auction_open" }
+    "close" { "auction_close" }
+    default { "after_hours_fixed" }
+  }
+  $sharedPendingPushRoot = Get-SharedPendingPushRoot -DataRoot $DataRoot -Scope $pendingScope
   $auctionSettingsPath = Join-Path $DataRoot "auction_feishu.settings.yml"
   $cacheDir = Join-Path $root "cache"
   New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
@@ -639,11 +643,20 @@ function Get-AfterHoursDataMap {
     foreach ($item in @($raw)) {
       $code = [string]$item.code
       if (-not $code) { continue }
+      $dataStatus = if ($item.PSObject.Properties.Name -contains "data_status") { [string]$item.data_status } else { "" }
+      $supported = $true
+      if ($item.PSObject.Properties.Name -contains "supported") {
+        $supported = [bool]$item.supported
+      } elseif ($dataStatus -eq "missing_after_hours_fields") {
+        $supported = $false
+      }
+      $volume = if ($item.PSObject.Properties.Name -contains "after_hours_volume") { $item.after_hours_volume } else { $item.volume }
+      $amount = if ($item.PSObject.Properties.Name -contains "after_hours_amount") { $item.after_hours_amount } else { $item.amount }
       $map[$code] = [pscustomobject]@{
         source = if ($item.PSObject.Properties.Name -contains "source" -and $item.source) { [string]$item.source } else { "external_after_hours_file" }
-        supported = if ($item.PSObject.Properties.Name -contains "supported") { [bool]$item.supported } else { $true }
-        volume = Get-SafeDoubleOrNull $item.volume
-        amount = Get-SafeDoubleOrNull $item.amount
+        supported = $supported
+        volume = Get-SafeDoubleOrNull $volume
+        amount = Get-SafeDoubleOrNull $amount
       }
     }
     return $map
@@ -1610,6 +1623,20 @@ function New-AfterHoursReportContent {
   $activeCount = @($Assessments | Where-Object { $_.activity_tag -eq "盘后较活跃" }).Count
   $veryActiveCount = @($Assessments | Where-Object { $_.activity_tag -eq "盘后异常活跃" }).Count
   $unsupportedCount = @($Assessments | Where-Object { $_.status -eq "unsupported" }).Count
+  $sourceLabels = @(
+    $Assessments |
+      Select-Object -ExpandProperty after_hours_source -Unique |
+      Where-Object { $_ }
+  )
+  $sourceDisplay = if ($sourceLabels -contains "tushare") {
+    "Tushare Pro"
+  } elseif ($sourceLabels -contains "eastmoney_trends2") {
+    "东方财富"
+  } else {
+    (($sourceLabels | ForEach-Object {
+      if ($_ -eq "external_after_hours_file") { "外部盘后数据文件" } else { [string]$_ }
+    }) -join " / ")
+  }
 
   $lines = New-Object System.Collections.Generic.List[string]
   $lines.Add("# A股持仓盘后固定价格交易监控｜$TradeDate")
@@ -1617,6 +1644,10 @@ function New-AfterHoursReportContent {
   $lines.Add("> 当前场景：**15:05—15:30 盘后固定价格交易监控**")
   $lines.Add("")
   $lines.Add("> 说明：本报告仅分析 **15:05—15:30** 盘后固定价格交易活跃度，不改变 **15:00** 收盘价。")
+  if ($sourceDisplay) {
+    $lines.Add("")
+    $lines.Add("> 盘后数据来源：**$sourceDisplay**")
+  }
   $lines.Add("")
   $lines.Add("## 总览")
   $lines.Add("- 持仓股票数量：**$($Assessments.Count)**")
@@ -1631,7 +1662,7 @@ function New-AfterHoursReportContent {
     $stockLabel = Format-AuctionStockLabel -Name $item.name -Code $item.code -PrevCloseMode $item.prev_close_mode
     $lines.Add("- $stockLabel")
     $lines.Add("  - 15:00收盘价：**$(if ($null -ne $item.close_price) { '{0:N2}' -f $item.close_price } else { '--' })**")
-    $lines.Add("  - 15:05—15:30盘后成交量：**$(if ($null -ne $item.after_hours_volume) { '{0:N0}' -f $item.after_hours_volume } else { '--' })**")
+    $lines.Add("  - 15:05—15:30盘后成交量：**$(if ($null -ne $item.after_hours_volume) { '{0:N0}' -f $item.after_hours_volume } else { '--' })** 手")
     $lines.Add("  - 15:05—15:30盘后成交额：**$(Format-CnyWan $item.after_hours_amount)**")
     $lines.Add("  - 盘后成交额占常规交易成交额比例：**$(Format-Pct $item.after_hours_ratio_regular_pct)**")
     $lines.Add("  - 盘后成交额占全天合计成交额比例：**$(Format-Pct $item.after_hours_ratio_total_pct)**")

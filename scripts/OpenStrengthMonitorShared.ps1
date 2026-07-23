@@ -21,8 +21,7 @@ function New-OpenStrengthContext {
   $context = New-MonitorContext -DataRoot $runtimeRoot -LogName "open_strength.log"
   $dayRoot = Join-Path $DataRoot $TradeDate
   New-Item -ItemType Directory -Force -Path $dayRoot | Out-Null
-  $sharedPendingPushRoot = Join-Path $DataRoot "pending_pushes"
-  New-Item -ItemType Directory -Force -Path $sharedPendingPushRoot | Out-Null
+  $sharedPendingPushRoot = Get-SharedPendingPushRoot -DataRoot $DataRoot -Scope "open_strength"
   $settingsPath = Join-Path $DataRoot "auction_feishu.settings.yml"
   if (-not (Test-Path -LiteralPath $settingsPath)) {
     $projectSettingsPath = Join-Path (Split-Path -Parent $PSScriptRoot) "data\auction_feishu.settings.yml"

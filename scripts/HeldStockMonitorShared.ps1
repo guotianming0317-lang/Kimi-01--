@@ -206,6 +206,25 @@ function New-MonitorContext {
   }
 }
 
+function Get-SharedPendingPushRoot {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$DataRoot,
+
+    [string]$Scope = "general"
+  )
+
+  $root = Join-Path $DataRoot "pending_pushes"
+  if ([string]::IsNullOrWhiteSpace($Scope)) {
+    $path = $root
+  } else {
+    $path = Join-Path $root $Scope
+  }
+
+  New-Item -ItemType Directory -Force -Path $path | Out-Null
+  return $path
+}
+
 function Write-MonitorLog {
   param(
     [Parameter(Mandatory = $true)]

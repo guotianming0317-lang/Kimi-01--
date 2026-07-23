@@ -7,7 +7,7 @@
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "HeldStockMonitorShared.ps1")
-$sharedPendingPushRoot = Join-Path (Split-Path -Parent $PSScriptRoot) "data\pending_pushes"
+$sharedPendingPushRoot = Get-SharedPendingPushRoot -DataRoot (Join-Path (Split-Path -Parent $PSScriptRoot) "data") -Scope "fixed_report"
 
 $context = New-MonitorContext -DataRoot $DataRoot -LogName "fund_push.log"
 if (Test-MonitorPaused -PauseFlag $context.PauseFlag) {
